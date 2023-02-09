@@ -22,21 +22,38 @@
  */
 use crate::common::*;
 use std::fmt;
-use std::fmt::Formatter;
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+use serde::{Deserialize, Serialize};
+
+use super::{oem::SystemExtensions, ODataId, ODataLinks};
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub enum SystemPowerControl {
     On,
-    ForceOff,
-    ForceRestart,
-    GracefulRestart, // preferred
     GracefulShutdown,
-    PushPowerButton,
-    PowerCycle, // alternative hammer
+    ForceOff,
+    GracefulRestart,
+    ForceRestart,
+    // Dell also has: PushPowerButton, PowerCycle, and Nmi
+    // Lenovo also has: ForceOn and Nmi
 }
 
 impl fmt::Display for SystemPowerControl {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+pub enum PowerState {
+    Off,
+    On,
+    PoweringOff,
+    PoweringOn,
+}
+
+impl fmt::Display for PowerState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
@@ -49,46 +66,12 @@ pub struct StatusState {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "PascalCase")]
-pub struct OemDellSystem {
-    #[serde(rename = "BIOSReleaseDate")]
-    pub bios_release_date: String,
-    pub chassis_service_tag: String,
-    pub chassis_system_height_unit: i64,
-    pub estimated_exhaust_temperature_celsius: i64,
-    #[serde(rename = "EstimatedSystemAirflowCFM")]
-    pub estimated_system_airflow_cfm: i64,
-    pub express_service_code: String,
-    pub fan_rollup_status: String,
-    pub intrusion_rollup_status: String,
-    pub managed_system_size: String,
-    #[serde(rename = "MaxCPUSockets")]
-    pub max_cpu_sockets: i64,
-    #[serde(rename = "MaxDIMMSlots")]
-    pub max_dimm_slots: i64,
-    #[serde(rename = "MaxPCIeSlots")]
-    pub max_pcie_slots: i64,
-    #[serde(rename = "PopulatedDIMMSlots")]
-    pub populated_dimm_slots: i64,
-    #[serde(rename = "PopulatedPCIeSlots")]
-    pub populated_pcie_slots: i64,
-    pub power_cap_enabled_state: String,
-    pub system_generation: String,
-    pub temp_rollup_status: String,
-    #[serde(rename = "UUID")]
-    pub uuid: String,
-    pub volt_rollup_status: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "PascalCase")]
-pub struct OemDell {
-    pub dell_system: OemDellSystem,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "PascalCase")]
-pub struct OemData {
-    pub dell: OemDell,
+pub struct Systems {
+    #[serde(flatten)]
+    pub odata: ODataLinks,
+    pub description: String,
+    pub members: Vec<ODataId>,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -123,25 +106,16 @@ pub struct ComputerSystem {
     pub bios_version: String,
     pub manufacturer: String,
     pub model: String,
-    pub oem: OemData,
-    pub part_number: String,
-    pub power_state: String,
+    pub oem: SystemExtensions,
+    // Dell: String. Lenovo: always null
+    //pub part_number: String,
+    pub power_state: PowerState,
     pub processor_summary: SystemProcessors,
     #[serde(rename = "SKU")]
     pub sku: String,
     pub serial_number: String,
     pub status: SystemStatus,
     pub trusted_modules: Vec<TrustedModule>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "PascalCase")]
-pub struct Systems {
-    #[serde(flatten)]
-    pub odata: ODataLinks,
-    pub description: String,
-    pub members: Vec<ODataId>,
-    pub name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -160,7 +134,7 @@ pub struct BootOption {
     #[serde(flatten)]
     pub odata: ODataLinks,
     pub description: String,
-    pub boot_option_enabled: String,
+    pub boot_option_enabled: Option<String>,
     pub boot_option_reference: String,
     pub display_name: String,
     pub id: String,
@@ -168,12 +142,43 @@ pub struct BootOption {
     pub uefi_device_path: String,
 }
 
-#[test]
-fn test_system_parser() {
-    let test_data1 = include_str!("../tests/systems.json");
-    let result1: Systems = serde_json::from_str(test_data1).unwrap();
-    let test_data2 = include_str!("../tests/system.json");
-    let result2: ComputerSystem = serde_json::from_str(test_data2).unwrap();
-    println!("result1: {:#?}", result1);
-    println!("result2: {:#?}", result2);
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_systems_parser() {
+        let data = include_str!("testdata/systems.json");
+        let result: super::Systems = serde_json::from_str(data).unwrap();
+        assert_eq!(result.members.len(), 1);
+        assert_eq!(result.odata.odata_id, "/redfish/v1/Systems");
+    }
+
+    #[test]
+    fn test_system_dell() {
+        let data = include_str!("testdata/system_dell.json");
+        let result: super::ComputerSystem = serde_json::from_str(data).unwrap();
+        assert_eq!(result.power_state, crate::PowerState::On);
+        assert_eq!(result.processor_summary.count, 2);
+    }
+
+    #[test]
+    fn test_system_lenovo() {
+        let data = include_str!("testdata/system_lenovo.json");
+        let result: super::ComputerSystem = serde_json::from_str(data).unwrap();
+        assert_eq!(result.oem.lenovo.unwrap().total_power_on_hours, 3816);
+        assert_eq!(result.processor_summary.count, 2);
+    }
+
+    #[test]
+    fn test_boot_options() {
+        let data = include_str!("testdata/boot_options.json");
+        let result: super::BootOptions = serde_json::from_str(data).unwrap();
+        assert_eq!(result.members.len(), 5);
+    }
+
+    #[test]
+    fn test_boot_option() {
+        let data = include_str!("testdata/boot_option.json");
+        let result: super::BootOption = serde_json::from_str(data).unwrap();
+        assert_eq!(result.name, "Network");
+    }
 }

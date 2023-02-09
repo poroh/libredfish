@@ -1,4 +1,7 @@
-use crate::common::*;
+use serde::{Deserialize, Serialize};
+
+use super::{Firmware, ODataId, ODataLinks, ResourceStatus};
+
 pub trait Hardware {
     fn odata_context(&self) -> String;
     fn odata_id(&self) -> String;
@@ -11,7 +14,7 @@ pub trait Hardware {
     fn model(&self) -> String;
     fn name(&self) -> String;
     fn serial_number(&self) -> String;
-    fn status(&self) -> AllStatus;
+    fn status(&self) -> ResourceStatus;
     fn get_type(&self) -> HardwareType;
 }
 
@@ -36,7 +39,7 @@ pub struct HardwareCommon {
     pub model: String,
     pub name: String,
     pub serial_number: String,
-    pub status: AllStatus,
+    pub status: ResourceStatus,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -60,19 +63,15 @@ pub struct ArrayController {
     #[serde(rename = "Type")]
     pub controller_type: String,
 }
-impl Status for ArrayController {
-    fn health(&self) -> String {
-        self.hardware_common.status.health.to_owned()
-    }
-
-    fn state(&self) -> String {
-        self.hardware_common.status.state.to_owned()
-    }
-}
 
 impl Hardware for ArrayController {
     fn odata_context(&self) -> String {
-        self.hardware_common.odata.odata_context.to_owned()
+        self.hardware_common
+            .odata
+            .odata_context
+            .as_deref()
+            .unwrap_or("")
+            .to_owned()
     }
     fn odata_id(&self) -> String {
         self.hardware_common.odata.odata_id.to_owned()
@@ -104,19 +103,12 @@ impl Hardware for ArrayController {
     fn serial_number(&self) -> String {
         self.hardware_common.serial_number.to_owned()
     }
-    fn status(&self) -> AllStatus {
-        self.hardware_common.status.to_owned()
+    fn status(&self) -> ResourceStatus {
+        self.hardware_common.status
     }
     fn get_type(&self) -> HardwareType {
         HardwareType::ArrayController
     }
-}
-
-#[test]
-fn test_array_controller_parser() {
-    let test_data = include_str!("../tests/array-controller.json");
-    let result: ArrayController = serde_json::from_str(test_data).unwrap();
-    println!("result: {:#?}", result);
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -142,13 +134,6 @@ pub struct ArrayControllers {
     pub controller_type: String,
 }
 
-#[test]
-fn test_array_controllers_parser() {
-    let test_data = include_str!("../tests/array-controllers.json");
-    let result: ArrayControllers = serde_json::from_str(test_data).unwrap();
-    println!("result: {:#?}", result);
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "PascalCase")]
 pub struct SmartArray {
@@ -169,19 +154,15 @@ pub struct SmartArray {
     #[serde(rename = "Type")]
     pub array_type: String,
 }
-impl Status for SmartArray {
-    fn health(&self) -> String {
-        self.hardware_common.status.health.to_owned()
-    }
-
-    fn state(&self) -> String {
-        self.hardware_common.status.state.to_owned()
-    }
-}
 
 impl Hardware for SmartArray {
     fn odata_context(&self) -> String {
-        self.hardware_common.odata.odata_context.to_owned()
+        self.hardware_common
+            .odata
+            .odata_context
+            .as_deref()
+            .unwrap_or("")
+            .to_owned()
     }
     fn odata_id(&self) -> String {
         self.hardware_common.odata.odata_id.to_owned()
@@ -213,19 +194,12 @@ impl Hardware for SmartArray {
     fn serial_number(&self) -> String {
         self.hardware_common.serial_number.to_owned()
     }
-    fn status(&self) -> AllStatus {
-        self.hardware_common.status.to_owned()
+    fn status(&self) -> ResourceStatus {
+        self.hardware_common.status
     }
     fn get_type(&self) -> HardwareType {
         HardwareType::SmartArray
     }
-}
-
-#[test]
-fn test_smart_array_parser() {
-    let test_data = include_str!("../tests/smart-array.json");
-    let result: SmartArray = serde_json::from_str(test_data).unwrap();
-    println!("result: {:#?}", result);
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -237,19 +211,15 @@ pub struct StorageEnclosure {
     #[serde(rename = "Type")]
     pub enclosure_type: String,
 }
-impl Status for StorageEnclosure {
-    fn health(&self) -> String {
-        self.hardware_common.status.health.to_owned()
-    }
-
-    fn state(&self) -> String {
-        self.hardware_common.status.state.to_owned()
-    }
-}
 
 impl Hardware for StorageEnclosure {
     fn odata_context(&self) -> String {
-        self.hardware_common.odata.odata_context.to_owned()
+        self.hardware_common
+            .odata
+            .odata_context
+            .as_deref()
+            .unwrap_or("")
+            .to_owned()
     }
     fn odata_id(&self) -> String {
         self.hardware_common.odata.odata_id.to_owned()
@@ -281,19 +251,12 @@ impl Hardware for StorageEnclosure {
     fn serial_number(&self) -> String {
         self.hardware_common.serial_number.to_owned()
     }
-    fn status(&self) -> AllStatus {
-        self.hardware_common.status.to_owned()
+    fn status(&self) -> ResourceStatus {
+        self.hardware_common.status
     }
     fn get_type(&self) -> HardwareType {
         HardwareType::StorageEnclosure
     }
-}
-
-#[test]
-fn test_storage_enclosure_parser() {
-    let test_data = include_str!("../tests/storage-enclosure.json");
-    let result: StorageEnclosure = serde_json::from_str(test_data).unwrap();
-    println!("result: {:#?}", result);
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -303,13 +266,6 @@ pub struct StorageEnclosures {
     pub mult_hardware: MultHardware,
     #[serde(rename = "Type")]
     pub enclosure_type: String,
-}
-
-#[test]
-fn test_storage_enclosures_parser() {
-    let test_data = include_str!("../tests/storage-enclosures.json");
-    let result: StorageEnclosures = serde_json::from_str(test_data).unwrap();
-    println!("result: {:#?}", result);
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -337,19 +293,15 @@ pub struct DiskDrive {
     #[serde(rename = "Type")]
     pub drive_type: String,
 }
-impl Status for DiskDrive {
-    fn health(&self) -> String {
-        self.hardware_common.status.health.to_owned()
-    }
-
-    fn state(&self) -> String {
-        self.hardware_common.status.state.to_owned()
-    }
-}
 
 impl Hardware for DiskDrive {
     fn odata_context(&self) -> String {
-        self.hardware_common.odata.odata_context.to_owned()
+        self.hardware_common
+            .odata
+            .odata_context
+            .as_deref()
+            .unwrap_or("")
+            .to_owned()
     }
     fn odata_id(&self) -> String {
         self.hardware_common.odata.odata_id.to_owned()
@@ -381,19 +333,12 @@ impl Hardware for DiskDrive {
     fn serial_number(&self) -> String {
         self.hardware_common.serial_number.to_owned()
     }
-    fn status(&self) -> AllStatus {
-        self.hardware_common.status.to_owned()
+    fn status(&self) -> ResourceStatus {
+        self.hardware_common.status
     }
     fn get_type(&self) -> HardwareType {
         HardwareType::DiskDrive
     }
-}
-
-#[test]
-fn test_storage_drive_parser() {
-    let test_data = include_str!("../tests/disk-drive.json");
-    let result: DiskDrive = serde_json::from_str(test_data).unwrap();
-    println!("result: {:#?}", result);
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -403,13 +348,6 @@ pub struct DiskDrives {
     pub mult_hardware: MultHardware,
     #[serde(rename = "Type")]
     pub drive_type: String,
-}
-
-#[test]
-fn test_storage_drives_parser() {
-    let test_data = include_str!("../tests/disk-drives.json");
-    let result: DiskDrives = serde_json::from_str(test_data).unwrap();
-    println!("result: {:#?}", result);
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -427,9 +365,61 @@ pub struct LogicalDrives {
     pub drive_type: String,
 }
 
-#[test]
-fn test_storage_logical_drives_parser() {
-    let test_data = include_str!("../tests/logical-drives.json");
-    let result: LogicalDrives = serde_json::from_str(test_data).unwrap();
-    println!("result: {:#?}", result);
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_storage_logical_drives_parser() {
+        let test_data = include_str!("testdata/logical-drives.json");
+        let result: super::LogicalDrives = serde_json::from_str(test_data).unwrap();
+        println!("result: {result:#?}");
+    }
+
+    #[test]
+    fn test_array_controller_parser() {
+        let test_data = include_str!("testdata/array-controller.json");
+        let result: super::ArrayController = serde_json::from_str(test_data).unwrap();
+        println!("result: {result:#?}");
+    }
+
+    #[test]
+    fn test_storage_drives_parser() {
+        let test_data = include_str!("testdata/disk-drives.json");
+        let result: super::DiskDrives = serde_json::from_str(test_data).unwrap();
+        println!("result: {result:#?}");
+    }
+
+    #[test]
+    fn test_storage_drive_parser() {
+        let test_data = include_str!("testdata/disk-drive.json");
+        let result: super::DiskDrive = serde_json::from_str(test_data).unwrap();
+        println!("result: {result:#?}");
+    }
+
+    #[test]
+    fn test_array_controllers_parser() {
+        let test_data = include_str!("testdata/array-controllers.json");
+        let result: super::ArrayControllers = serde_json::from_str(test_data).unwrap();
+        println!("result: {result:#?}");
+    }
+
+    #[test]
+    fn test_smart_array_parser() {
+        let test_data = include_str!("testdata/smart-array.json");
+        let result: super::SmartArray = serde_json::from_str(test_data).unwrap();
+        println!("result: {result:#?}");
+    }
+
+    #[test]
+    fn test_storage_enclosure_parser() {
+        let test_data = include_str!("testdata/storage-enclosure.json");
+        let result: super::StorageEnclosure = serde_json::from_str(test_data).unwrap();
+        println!("result: {result:#?}");
+    }
+
+    #[test]
+    fn test_storage_enclosures_parser() {
+        let test_data = include_str!("testdata/storage-enclosures.json");
+        let result: super::StorageEnclosures = serde_json::from_str(test_data).unwrap();
+        println!("result: {result:#?}");
+    }
 }

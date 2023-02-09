@@ -21,10 +21,17 @@
  */
 use super::{Action, ActionsManagerReset, Availableaction, Commandshell, Status};
 use crate::common::{Firmware, HpType, LinkType, ODataId, ODataLinks, StatusVec};
+use serde::{Deserialize, Serialize};
+
+use crate::model::{
+    Action, ActionsManagerReset, Availableaction, Commandshell, ResourceHealth, ResourceState,
+    ResourceStatus, Status,
+};
+use crate::model::{Firmware, LinkType, ODataId, ODataLinks, StatusVec};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "PascalCase")]
-pub struct ManagerHp {
+pub struct Manager {
     #[serde(flatten)]
     pub odata: ODataLinks,
     pub actions: Action,
@@ -50,11 +57,11 @@ pub struct ManagerHp {
     pub virtual_media: ODataId,
 }
 
-impl StatusVec for ManagerHp {
-    fn get_vec(&self) -> Vec<Box<dyn crate::common::Status>> {
-        let mut v: Vec<Box<dyn crate::common::Status>> = Vec::new();
+impl StatusVec for Manager {
+    fn get_vec(&self) -> Vec<ResourceStatus> {
+        let mut v: Vec<ResourceStatus> = Vec::new();
         for res in &self.oem.hp.i_lo_self_test_results {
-            v.push(Box::new(res.clone()))
+            v.push(res.get_resource_status());
         }
         v
     }
@@ -133,15 +140,14 @@ pub struct OemHpLicense {
 pub struct OemHpIloselftestresult {
     pub notes: String,
     pub self_test_name: String,
-    pub status: String,
+    pub status: ResourceHealth,
 }
-impl crate::common::Status for OemHpIloselftestresult {
-    fn health(&self) -> String {
-        self.status.to_owned()
-    }
-
-    fn state(&self) -> String {
-        String::new()
+impl OemHpIloselftestresult {
+    fn get_resource_status(&self) -> ResourceStatus {
+        ResourceStatus {
+            health: Some(self.status),
+            state: ResourceState::Enabled, // There is no 'unknown' option
+        }
     }
 }
 
@@ -174,4 +180,13 @@ pub struct OemHp {
 #[serde(rename_all = "PascalCase")]
 pub struct OemHpWrapper {
     pub hp: OemHp,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "PascalCase")]
+pub struct HpType {
+    #[serde(rename = "@odata.type")]
+    pub odata_type: String,
+    #[serde(rename = "Type")]
+    pub hp_type: String,
 }
