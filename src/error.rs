@@ -77,4 +77,7 @@ pub enum RedfishError {
         field: String,
         err: InvalidValueError,
     },
+
+    #[error("BMC is locked down, operation cannot be applied. Disable lockdown and retry.")]
+    Lockdown,
 }

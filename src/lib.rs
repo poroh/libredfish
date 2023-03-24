@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 pub mod model;
-pub use model::system::{PowerState, SystemPowerControl, Systems};
+pub use model::system::{PCIeDevice, PowerState, SystemPowerControl, Systems};
 pub use model::EnabledDisabled;
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +42,9 @@ pub trait Redfish: Send + Sync + 'static {
     /// Reset and enable the TPM
     fn clear_tpm(&self) -> Result<(), RedfishError>;
 
+    /// List PCIe devices
+    fn pcie_devices(&self) -> Result<Vec<PCIeDevice>, RedfishError>;
+
     /*
      * Diagnostic calls
      */
@@ -51,6 +54,9 @@ pub trait Redfish: Send + Sync + 'static {
     /// Pending BIOS attributes. Changes that were requested but not applied yet because
     /// they need a reboot.
     fn pending(&self) -> Result<HashMap<String, serde_json::Value>, RedfishError>;
+
+    /// Clear all pending jobs
+    fn clear_pending(&self) -> Result<(), RedfishError>;
 }
 
 // When Carbide drops it's `IpmiCommand.launch_command` background job system, we can

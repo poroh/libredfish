@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use crate::{
     model::{oem::dell, OnOff},
     standard::RedfishStandard,
-    Boot, EnabledDisabled, PowerState, Redfish, RedfishError, Status, StatusInternal,
+    Boot, EnabledDisabled, PCIeDevice, PowerState, Redfish, RedfishError, Status, StatusInternal,
     SystemPowerControl,
 };
 
@@ -91,7 +91,7 @@ impl Redfish for Bmc {
 
         // BMC lockdown
 
-        let attrs = self.manager_attributes()?;
+        let (attrs, url) = self.manager_attributes()?;
 
         let key = "Lockdown.1.SystemLockdown";
         let system_lockdown = attrs
@@ -230,11 +230,24 @@ impl Redfish for Bmc {
     fn pending(&self) -> Result<HashMap<String, serde_json::Value>, RedfishError> {
         self.s.pending()
     }
+
+    fn clear_pending(&self) -> Result<(), RedfishError> {
+        self.delete_job_queue()
+    }
+
+    fn pcie_devices(&self) -> Result<Vec<PCIeDevice>, RedfishError> {
+        self.s.pcie_devices()
+    }
 }
 
 impl Bmc {
     // No changes can be applied if there are pending jobs
     fn delete_job_queue(&self) -> Result<(), RedfishError> {
+        // The queue can't be cleared if system lockdown is enabled
+        if self.is_lockdown()? {
+            return Err(RedfishError::Lockdown);
+        }
+
         let url = format!(
             "Managers/{}/Oem/Dell/DellJobService/Actions/DellJobService.DeleteJobQueue",
             self.s.manager_id()
@@ -242,6 +255,28 @@ impl Bmc {
         let mut body = HashMap::new();
         body.insert("JobID", "JID_CLEARALL".to_string());
         self.s.client.post(&url, body).map(|_status_code| ())
+    }
+
+    // Is system lockdown enabled?
+    fn is_lockdown(&self) -> Result<bool, RedfishError> {
+        let (attrs, url) = self.manager_attributes()?;
+
+        let key = "Lockdown.1.SystemLockdown";
+        let system_lockdown = attrs
+            .get(key)
+            .ok_or_else(|| RedfishError::MissingKey {
+                key: key.to_string(),
+                url: url.to_string(),
+            })?
+            .as_str()
+            .ok_or_else(|| RedfishError::InvalidKeyType {
+                key: key.to_string(),
+                expected_type: "&str".to_string(),
+                url: url.to_string(),
+            })?;
+
+        let enabled = EnabledDisabled::Enabled.to_string();
+        Ok(system_lockdown == enabled)
     }
 
     fn set_boot_first(&self, entry: dell::BootDevices, once: bool) -> Result<(), RedfishError> {
@@ -294,6 +329,9 @@ impl Bmc {
         let apply_time = dell::SetSettingsApplyTime {
             apply_time: dell::RedfishSettingsApplyTime::OnReset,
         };
+
+        // First change all settings except lockdown, because that applies immediately
+        // and prevents the other settings being applied.
         let boot_entry = dell::ServerBoot {
             first_boot_device: entry,
             boot_once: if once {
@@ -303,15 +341,31 @@ impl Bmc {
             },
         };
         let lockdown = dell::BmcLockdown {
-            system_lockdown: EnabledDisabled::Enabled,
-            racadm_enable: EnabledDisabled::Disabled,
-            server_boot: boot_entry,
+            system_lockdown: None,
+            racadm_enable: Some(EnabledDisabled::Disabled),
+            server_boot: Some(boot_entry),
         };
         let set_bmc_lockdown = dell::SetBmcLockdown {
             redfish_settings_apply_time: apply_time,
             attributes: lockdown,
         };
-        let url = format!("Managers/{}/Attributes", self.s.manager_id());
+        let manager_id = self.s.manager_id();
+        let url = format!("Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}");
+        self.s
+            .client
+            .patch(&url, set_bmc_lockdown)
+            .map(|_status_code| ())?;
+
+        // Now lockdown
+        let lockdown = dell::BmcLockdown {
+            system_lockdown: Some(EnabledDisabled::Enabled),
+            racadm_enable: None,
+            server_boot: None,
+        };
+        let set_bmc_lockdown = dell::SetBmcLockdown {
+            redfish_settings_apply_time: apply_time,
+            attributes: lockdown,
+        };
         self.s
             .client
             .patch(&url, set_bmc_lockdown)
@@ -354,15 +408,16 @@ impl Bmc {
             },
         };
         let lockdown = dell::BmcLockdown {
-            system_lockdown: EnabledDisabled::Disabled,
-            racadm_enable: EnabledDisabled::Enabled,
-            server_boot: boot_entry,
+            system_lockdown: Some(EnabledDisabled::Disabled),
+            racadm_enable: Some(EnabledDisabled::Enabled),
+            server_boot: Some(boot_entry),
         };
         let set_bmc_lockdown = dell::SetBmcLockdown {
             redfish_settings_apply_time: apply_time,
             attributes: lockdown,
         };
-        let url = format!("Managers/{}/Attributes", self.s.manager_id());
+        let manager_id = self.s.manager_id();
+        let url = format!("Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}");
         self.s
             .client
             .patch(&url, set_bmc_lockdown)
@@ -399,7 +454,7 @@ impl Bmc {
     }
 
     fn bmc_remote_access_status(&self) -> Result<Status, RedfishError> {
-        let attrs = self.manager_attributes()?;
+        let (attrs, _) = self.manager_attributes()?;
         let expected = vec![
             // "any" means any value counts as correctly disabled
             ("SerialRedirection.1.Enable", "Enabled", "Disabled"),
@@ -537,15 +592,17 @@ impl Bmc {
         })
     }
 
+    // Second value in tuple is URL we used to fetch attributes, for diagnostics
     fn manager_attributes(
         &self,
-    ) -> Result<serde_json::Map<String, serde_json::Value>, RedfishError> {
+    ) -> Result<(serde_json::Map<String, serde_json::Value>, String), RedfishError> {
         let manager_id = self.s.manager_id();
         let url = &format!("Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}");
         let (_status_code, body): (_, HashMap<String, serde_json::Value>) =
             self.s.client.get(url)?;
         let key = "Attributes";
-        body.get(key)
+        let v = body
+            .get(key)
             .ok_or_else(|| RedfishError::MissingKey {
                 key: key.to_string(),
                 url: url.to_string(),
@@ -556,7 +613,8 @@ impl Bmc {
                 expected_type: "Object".to_string(),
                 url: url.to_string(),
             })
-            .cloned()
+            .cloned()?;
+        Ok((v, url.to_string()))
     }
 
     // TPM is enabled by default so we never call this.
