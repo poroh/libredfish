@@ -44,7 +44,7 @@ impl fmt::Display for SystemPowerControl {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum PowerState {
     Off,
     On,

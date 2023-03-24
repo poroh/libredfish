@@ -76,7 +76,7 @@ impl Redfish for Bmc {
         // BIOS lockdown
 
         let url = format!("Systems/{}/Bios", self.s.system_id());
-        let (_status_code, bios): (_, dell::Bios) = self.s.net.get(&url)?;
+        let (_status_code, bios): (_, dell::Bios) = self.s.client.get(&url)?;
 
         let in_band = bios.attributes.in_band_manageability_interface;
         let uefi_var = bios.attributes.uefi_variable_access;
@@ -163,7 +163,7 @@ impl Redfish for Bmc {
 
         let url = format!("Systems/{}/Bios/Settings/", self.s.system_id());
         self.s
-            .net
+            .client
             .patch(&url, set_serial_attrs)
             .map(|_status_code| ())
     }
@@ -221,7 +221,10 @@ impl Redfish for Bmc {
             attributes: tpm,
         };
         let url = format!("Systems/{}/Bios/Settings/", self.s.system_id());
-        self.s.net.patch(&url, set_tpm_clear).map(|_status_code| ())
+        self.s
+            .client
+            .patch(&url, set_tpm_clear)
+            .map(|_status_code| ())
     }
 
     fn pending(&self) -> Result<HashMap<String, serde_json::Value>, RedfishError> {
@@ -238,7 +241,7 @@ impl Bmc {
         );
         let mut body = HashMap::new();
         body.insert("JobID", "JID_CLEARALL".to_string());
-        self.s.net.post(&url, body).map(|_status_code| ())
+        self.s.client.post(&url, body).map(|_status_code| ())
     }
 
     fn set_boot_first(&self, entry: dell::BootDevices, once: bool) -> Result<(), RedfishError> {
@@ -261,7 +264,7 @@ impl Bmc {
             attributes: boot,
         };
         let url = format!("Managers/{}/Attributes", self.s.manager_id());
-        self.s.net.patch(&url, set_boot).map(|_status_code| ())
+        self.s.client.patch(&url, set_boot).map(|_status_code| ())
     }
 
     fn enable_bios_lockdown(&self) -> Result<(), RedfishError> {
@@ -278,7 +281,7 @@ impl Bmc {
         };
         let url = format!("Systems/{}/Bios/Settings/", self.s.system_id());
         self.s
-            .net
+            .client
             .patch(&url, set_lockdown_attrs)
             .map(|_status_code| ())
     }
@@ -310,7 +313,7 @@ impl Bmc {
         };
         let url = format!("Managers/{}/Attributes", self.s.manager_id());
         self.s
-            .net
+            .client
             .patch(&url, set_bmc_lockdown)
             .map(|_status_code| ())
     }
@@ -329,7 +332,7 @@ impl Bmc {
         };
         let url = format!("Systems/{}/Bios/Settings/", self.s.system_id());
         self.s
-            .net
+            .client
             .patch(&url, set_lockdown_attrs)
             .map(|_status_code| ())
     }
@@ -361,7 +364,7 @@ impl Bmc {
         };
         let url = format!("Managers/{}/Attributes", self.s.manager_id());
         self.s
-            .net
+            .client
             .patch(&url, set_bmc_lockdown)
             .map(|_status_code| ())
     }
@@ -390,7 +393,7 @@ impl Bmc {
         };
         let url = format!("Managers/{}/Attributes", self.s.manager_id());
         self.s
-            .net
+            .client
             .patch(&url, set_remote_access)
             .map(|_status_code| ())
     }
@@ -457,7 +460,7 @@ impl Bmc {
         let mut disabled = true;
 
         let url = &format!("Systems/{}/Bios", self.s.system_id());
-        let (_status_code, bios): (_, dell::Bios) = self.s.net.get(url)?;
+        let (_status_code, bios): (_, dell::Bios) = self.s.client.get(url)?;
         let bios = bios.attributes;
 
         let val = bios.serial_comm;
@@ -539,7 +542,8 @@ impl Bmc {
     ) -> Result<serde_json::Map<String, serde_json::Value>, RedfishError> {
         let manager_id = self.s.manager_id();
         let url = &format!("Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}");
-        let (_status_code, body): (_, HashMap<String, serde_json::Value>) = self.s.net.get(url)?;
+        let (_status_code, body): (_, HashMap<String, serde_json::Value>) =
+            self.s.client.get(url)?;
         let key = "Attributes";
         body.get(key)
             .ok_or_else(|| RedfishError::MissingKey {
@@ -571,7 +575,7 @@ impl Bmc {
         };
         let url = format!("Systems/{}/Bios/Settings/", self.s.system_id());
         self.s
-            .net
+            .client
             .patch(&url, set_tpm_enabled)
             .map(|_status_code| ())
     }
@@ -593,7 +597,7 @@ impl Bmc {
         };
         let url = format!("Systems/{}/Bios/Settings/", self.s.system_id());
         self.s
-            .net
+            .client
             .patch(&url, set_tpm_disabled)
             .map(|_status_code| ())
     }
