@@ -27,7 +27,7 @@ use reqwest::{
     header::HeaderValue, header::ACCEPT, header::CONTENT_TYPE, Method, StatusCode,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use tracing::debug;
+use tracing::{debug, error};
 
 pub use crate::RedfishError;
 
@@ -271,6 +271,7 @@ impl RedfishHttpClient {
         }
 
         if !status_code.is_success() {
+            error!("RX {status_code} {response_body}");
             return Err(RedfishError::HTTPErrorCode { url, status_code });
         }
         Ok((status_code, res))
