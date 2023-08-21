@@ -71,6 +71,10 @@ impl Redfish for Bmc {
         self.s.power(action)
     }
 
+    fn bmc_reset(&self) -> Result<(), RedfishError> {
+        self.s.bmc_reset()
+    }
+
     fn get_thermal_metrics(&self) -> Result<Thermal, RedfishError> {
         self.s.get_thermal_metrics()
     }
@@ -242,7 +246,9 @@ impl Redfish for Bmc {
         match target {
             Boot::Pxe => self.set_boot_override(lenovo::BootSource::Pxe),
             Boot::HardDisk => self.set_boot_override(lenovo::BootSource::Hdd),
-            Boot::UefiHttp => unimplemented!("No lenovo UefiHttp implementation"),
+            Boot::UefiHttp => Err(RedfishError::NotSupported(
+                "No Lenovo UefiHttp implementation".to_string(),
+            )),
         }
     }
 
@@ -250,7 +256,9 @@ impl Redfish for Bmc {
         match target {
             Boot::Pxe => self.set_boot_first(lenovo::BootOptionName::Network),
             Boot::HardDisk => self.set_boot_first(lenovo::BootOptionName::HardDisk),
-            Boot::UefiHttp => unimplemented!("No lenovo UefiHttp implementation"),
+            Boot::UefiHttp => Err(RedfishError::NotSupported(
+                "No Lenovo UefiHttp implementation".to_string(),
+            )),
         }
     }
 
@@ -353,7 +361,9 @@ impl Redfish for Bmc {
         _current_uefi_password: &str,
         _new_uefi_password: &str,
     ) -> Result<(), RedfishError> {
-        unimplemented!()
+        Err(RedfishError::NotSupported(
+            "change_uefi_password".to_string(),
+        ))
     }
 
     fn change_boot_order(&self, boot_array: Vec<String>) -> Result<(), RedfishError> {
@@ -366,13 +376,13 @@ impl Redfish for Bmc {
             .client
             .req(Method::PATCH, &url, Some(body), Some(timeout), None)?;
         Ok(())
-    }    
-    
-    fn set_internal_cpu_model(&self, model: InternalCPUModel)-> Result<(), RedfishError> {
+    }
+
+    fn set_internal_cpu_model(&self, model: InternalCPUModel) -> Result<(), RedfishError> {
         self.s.set_internal_cpu_model(model)
     }
 
-    fn set_host_privilege_level(&self, level: HostPrivilegeLevel)-> Result<(), RedfishError> {
+    fn set_host_privilege_level(&self, level: HostPrivilegeLevel) -> Result<(), RedfishError> {
         self.s.set_host_privilege_level(level)
     }
 }

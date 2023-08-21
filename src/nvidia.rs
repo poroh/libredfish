@@ -20,14 +20,14 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
+use std::collections::HashMap;
+
+use crate::model::boot::{BootSourceOverrideEnabled, BootSourceOverrideTarget};
+use crate::model::oem::nvidia::{HostPrivilegeLevel, InternalCPUModel};
 use crate::{
     model::BootOption, standard::RedfishStandard, NetworkDeviceFunction,
     NetworkDeviceFunctionCollection, Redfish, RedfishError,
 };
-use std::collections::HashMap;
-
-use crate::model::boot::{BootSourceOverrideEnabled, BootSourceOverrideTarget};
-use crate::model::oem::nvidia::{InternalCPUModel, HostPrivilegeLevel};
 
 pub struct Bmc {
     s: RedfishStandard,
@@ -90,6 +90,14 @@ impl Redfish for Bmc {
 
     fn machine_setup(&self) -> Result<(), RedfishError> {
         self.s.machine_setup()
+    }
+
+    fn bmc_reset(&self) -> Result<(), RedfishError> {
+        self.s.bmc_reset()
+    }
+
+    fn get_thermal_metrics(&self) -> Result<crate::Thermal, RedfishError> {
+        self.s.get_thermal_metrics()
     }
 
     fn get_thermal_metrics(&self) -> Result<crate::Thermal, RedfishError> {
@@ -267,14 +275,20 @@ impl Redfish for Bmc {
         Ok(())
     }
 
-    fn set_host_privilege_level(&self, level: HostPrivilegeLevel)-> Result<(), RedfishError> {
-        let data = HashMap::from([("Attributes", HashMap::from([("Host Privilege Level", level.to_string())]))]);
+    fn set_host_privilege_level(&self, level: HostPrivilegeLevel) -> Result<(), RedfishError> {
+        let data = HashMap::from([(
+            "Attributes",
+            HashMap::from([("Host Privilege Level", level.to_string())]),
+        )]);
         let url = format!("Systems/{}/Bios/Settings", self.s.system_id());
         self.s.client.patch(&url, data).map(|_status_code| Ok(()))?
     }
 
-    fn set_internal_cpu_model(&self, model: InternalCPUModel)-> Result<(), RedfishError> {
-        let data = HashMap::from([("Attributes", HashMap::from([("Internal CPU Model", model.to_string())]))]);
+    fn set_internal_cpu_model(&self, model: InternalCPUModel) -> Result<(), RedfishError> {
+        let data = HashMap::from([(
+            "Attributes",
+            HashMap::from([("Internal CPU Model", model.to_string())]),
+        )]);
         let url = format!("Systems/{}/Bios/Settings", self.s.system_id());
         self.s.client.patch(&url, data).map(|_status_code| Ok(()))?
     }

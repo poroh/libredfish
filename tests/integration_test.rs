@@ -27,24 +27,26 @@
 ///
 /// See tests/mockup/README for details.
 use std::{
-    path::{Path, PathBuf},
+    env,
+    path::PathBuf,
     process::{Child, Command},
     sync::Once,
     thread::sleep,
     time::Duration,
 };
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use libredfish::Redfish;
 
 const ROOT_DIR: &str = env!("CARGO_MANIFEST_DIR");
+const PYTHON_VENV_DIR: &str = "libredfish-python-venv";
 
 // Ports we hope are not in use
 const DELL_PORT: &str = "8733";
 const LENOVO_PORT: &str = "8734";
 const NVIDIA_PORT: &str = "8735";
 
-static SETUP_LOGGING: Once = Once::new();
+static SETUP: Once = Once::new();
 
 #[test]
 fn test_dell() -> Result<(), anyhow::Error> {
@@ -62,12 +64,16 @@ fn test_nvidia_dpu() -> Result<(), anyhow::Error> {
 }
 
 fn nvidia_dpu_integration_test(redfish: &dyn Redfish) -> Result<(), anyhow::Error> {
+    let vendor = redfish.get_service_root()?.vendor;
+    assert!(vendor.is_some() && vendor.unwrap() == "Nvidia");
+    let managers = redfish.get_managers()?;
+    assert!(!managers.is_empty());
     let members = redfish.get_software_inventories()?.members;
     assert!(!members.is_empty());
     let v: Vec<&str> = members[0].odata_id.split('/').collect();
     assert!(redfish.get_firmware(v.last().unwrap())?.version.is_some());
     let boot = redfish.get_system()?.boot;
-    let mut boot_array = boot.boot_order.clone();
+    let mut boot_array = boot.boot_order;
     assert!(boot_array.len() > 1);
     boot_array.swap(0, 1);
     redfish.change_boot_order(boot_array)?;
@@ -76,7 +82,7 @@ fn nvidia_dpu_integration_test(redfish: &dyn Redfish) -> Result<(), anyhow::Erro
 }
 
 fn run_integration_test(vendor_dir: &'static str, port: &'static str) -> Result<(), anyhow::Error> {
-    SETUP_LOGGING.call_once(|| {
+    SETUP.call_once(move || {
         use tracing_subscriber::fmt::Layer;
         use tracing_subscriber::prelude::*;
         use tracing_subscriber::{filter::LevelFilter, EnvFilter};
@@ -94,44 +100,20 @@ fn run_integration_test(vendor_dir: &'static str, port: &'static str) -> Result<
                     .with_ansi(false),
             )
             .init();
+
+        let pip = create_python_venv().expect("Failed creating python virtual env");
+        install_python_requirements(pip).expect("failed installing python requirements");
     });
-    let mut pip = PathBuf::new();
-    let mut python = PathBuf::new();
-    match std::env::var_os("CI") {
-        Some(ci_env) => {
-            println!("Running in a GitLab CI job {:?}", ci_env);
-            if let Ok(python_path) = std::env::var("PYTHON_PATH") {
-                python.push(python_path)
-            } else {
-                return Err(anyhow::Error::msg("`python` not found"));
-            }
-
-            if let Ok(pip_path) = std::env::var("PIP_PATH") {
-                pip.push(pip_path)
-            } else {
-                return Err(anyhow::Error::msg("`pip` not found"));
-            }
-        }
-        None => {
-            println!("Not running in a GitLab CI job");
-            pip = match find_path("pip") {
-                Some(p) => p,
-                None => return Err(anyhow::Error::msg("`pip` not found")),
-            };
-            python = match find_path("python") {
-                Some(p) => p,
-                None => return Err(anyhow::Error::msg("`python` not found")),
-            };
-        }
-    }
-    let mut mockup_server = match MockupServer::new(vendor_dir, port, pip, python) {
-        Some(s) => s,
-        None => {
-            return Ok(());
-        }
+    let python = env::temp_dir()
+        .join(PYTHON_VENV_DIR)
+        .join("bin")
+        .join("python");
+    let mut mockup_server = MockupServer {
+        vendor_dir,
+        port,
+        python,
+        process: None,
     };
-
-    mockup_server.install_python_requirements()?;
     mockup_server.start()?; // stops on drop
 
     let endpoint = libredfish::Endpoint {
@@ -184,10 +166,57 @@ fn run_integration_test(vendor_dir: &'static str, port: &'static str) -> Result<
     Ok(())
 }
 
+/// Create a python virtualenv to install our requirements into.
+/// Return the path of pip
+fn create_python_venv() -> Result<PathBuf, anyhow::Error> {
+    let venv_dir = env::temp_dir().join(PYTHON_VENV_DIR);
+    let venv_out = Command::new("python3")
+        .arg("-m")
+        .arg("venv")
+        .arg(&venv_dir)
+        .output()
+        .context("Is 'python3' on your $PATH?")?;
+    if !venv_out.status.success() {
+        eprintln!("*** Python virtual env creation failed:");
+        eprintln!("\tSTDOUT: {}", String::from_utf8_lossy(&venv_out.stdout));
+        eprintln!("\tSTDERR: {}", String::from_utf8_lossy(&venv_out.stderr));
+        return Err(anyhow!(
+            "Failed running 'python3 -m venv {}. Exit code {}",
+            venv_dir.display(),
+            venv_out.status.code().unwrap_or(-1),
+        ));
+    }
+
+    Ok(venv_dir.join("bin/pip"))
+}
+
+fn install_python_requirements(pip: PathBuf) -> Result<(), anyhow::Error> {
+    let req_path = PathBuf::from(ROOT_DIR)
+        .join("tests")
+        .join("requirements.txt");
+    let output = Command::new(&pip)
+        .arg("install")
+        .arg("-q")
+        .arg("--requirement")
+        .arg(&req_path)
+        .output()?;
+    if !output.status.success() {
+        eprintln!("*** pip install failed:");
+        eprintln!("\tSTDOUT: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("\tSTDERR: {}", String::from_utf8_lossy(&output.stderr));
+        return Err(anyhow!(
+            "Failed running '{} install -q --requirement {}. Exit code {}",
+            pip.display(),
+            req_path.display(),
+            output.status.code().unwrap_or(-1),
+        ));
+    }
+    Ok(())
+}
+
 struct MockupServer {
     vendor_dir: &'static str,
     port: &'static str,
-    pip: PathBuf,
     python: PathBuf,
 
     process: Option<Child>,
@@ -204,43 +233,6 @@ impl Drop for MockupServer {
 }
 
 impl MockupServer {
-    // Creates a server if pip and python is present, otherwise returns None
-    fn new(
-        vendor_dir: &'static str,
-        port: &'static str,
-        pip: PathBuf,
-        python: PathBuf,
-    ) -> Option<MockupServer> {
-        Some(MockupServer {
-            vendor_dir,
-            port,
-            pip,
-            python,
-            process: None,
-        })
-    }
-
-    fn install_python_requirements(&self) -> Result<(), anyhow::Error> {
-        let req_path = PathBuf::from(ROOT_DIR)
-            .join("tests")
-            .join("requirements.txt");
-        let exit_code = Command::new(&self.pip)
-            .arg("install")
-            .arg("-q")
-            .arg("--requirement")
-            .arg(&req_path)
-            .status()?;
-        if !exit_code.success() {
-            return Err(anyhow!(
-                "Failed running '{} install -q --requirement {}. Exit code {}",
-                self.pip.display(),
-                req_path.display(),
-                exit_code
-            ));
-        }
-        Ok(())
-    }
-
     fn start(&mut self) -> std::io::Result<()> {
         self.process = Some(
             Command::new(&self.python)
@@ -260,20 +252,4 @@ impl MockupServer {
         sleep(Duration::from_secs(1)); // let it start
         Ok(())
     }
-}
-
-fn find_path<P>(bin: P) -> Option<PathBuf>
-where
-    P: AsRef<Path>,
-{
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths).find_map(|dir| {
-            let full_path = dir.join(&bin);
-            if full_path.is_file() {
-                Some(full_path)
-            } else {
-                None
-            }
-        })
-    })
 }
