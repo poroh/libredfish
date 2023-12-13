@@ -24,6 +24,7 @@ use std::{collections::HashMap, fs::File, time::Duration};
 use std::string::{String, ToString};
 use std::vec::Vec;
 
+use reqwest::Proxy;
 use reqwest::{
     header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE},
     Client as HttpClient, ClientBuilder as HttpClientBuilder, Method, StatusCode,
@@ -43,6 +44,7 @@ const MIN_UPLOAD_BANDWIDTH: u64 = 10_000;
 pub struct RedfishClientPoolBuilder {
     timeout: Duration,
     accept_invalid_certs: bool,
+    proxy: Option<String>,
 }
 
 impl RedfishClientPoolBuilder {
@@ -51,20 +53,30 @@ impl RedfishClientPoolBuilder {
     ///
     /// By default self signed certificates will be accepted, since BMCs usually
     /// use those.
-    pub fn reject_invalid_certs(mut self) -> RedfishClientPoolBuilder {
+    pub fn reject_invalid_certs(mut self) -> Self {
         self.accept_invalid_certs = false;
         self
     }
 
     /// Overwrites the timeout that will be applied to every request
-    pub fn timeout(mut self, timeout: Duration) -> RedfishClientPoolBuilder {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    pub fn proxy(mut self, proxy: Option<String>) -> Self {
+        self.proxy = proxy;
         self
     }
 
     /// Builds a Redfish Client Network Configuration
     pub fn build(&self) -> Result<RedfishClientPool, RedfishError> {
-        let builder = HttpClientBuilder::new();
+        let mut builder = HttpClientBuilder::new();
+        if let Some(proxy) = self.proxy.as_ref() {
+            let p = Proxy::https(proxy)?;
+            builder = builder.proxy(p);
+        }
+
         let http_client = builder
             .danger_accept_invalid_certs(self.accept_invalid_certs)
             .timeout(self.timeout)
@@ -112,6 +124,7 @@ impl RedfishClientPool {
             timeout: DEFAULT_TIMEOUT,
             // BMCs often have a self-signed cert, so usually this has to be true
             accept_invalid_certs: true,
+            proxy: None,
         }
     }
 
