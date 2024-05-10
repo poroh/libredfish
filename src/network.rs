@@ -20,21 +20,17 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-use crate::{model::InvalidValueError, standard::RedfishStandard, Redfish, RedfishError};
+use std::{collections::HashMap, path::Path, time::Duration};
+
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE},
     multipart::{Form, Part},
     Client as HttpClient, ClientBuilder as HttpClientBuilder, Method, Proxy, StatusCode,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    collections::HashMap,
-    path::Path,
-    string::{String, ToString},
-    time::Duration,
-    vec::Vec,
-};
 use tracing::debug;
+
+use crate::{model::InvalidValueError, standard::RedfishStandard, Redfish, RedfishError};
 
 pub const REDFISH_ENDPOINT: &str = "redfish/v1";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(20);
@@ -137,16 +133,21 @@ impl RedfishClientPool {
         endpoint: Endpoint,
     ) -> Result<Box<dyn crate::Redfish>, RedfishError> {
         let client = RedfishHttpClient::new(self.http_client.clone(), endpoint);
-        let mut s = RedfishStandard::new(client)?;
+        let mut s = RedfishStandard::new(client);
         let service_root = s.get_service_root().await?;
         let systems = s.get_systems().await?;
         let managers = s.get_managers().await?;
         let system_id = systems.first().unwrap();
         let manager_id = managers.first().unwrap();
         s.set_system_id(system_id)?;
-        s.set_manager_id(manager_id)?;
         // call set_system_id always before calling set_vendor
-        s.set_vendor(&service_root.vendor().unwrap_or("".to_string()))
+        s.set_manager_id(manager_id)?;
+
+        let Some(vendor) = service_root.vendor() else {
+            return Err(RedfishError::MissingVendor);
+        };
+        // returns the vendor specific object
+        s.set_vendor(vendor)
     }
 
     /// Creates a Redfish BMC client for a certain endpoint
@@ -157,7 +158,7 @@ impl RedfishClientPool {
         endpoint: Endpoint,
     ) -> Result<Box<RedfishStandard>, RedfishError> {
         let client = RedfishHttpClient::new(self.http_client.clone(), endpoint);
-        let s = RedfishStandard::new(client)?;
+        let s = RedfishStandard::new(client);
         Ok(Box::new(s))
     }
 }

@@ -20,6 +20,13 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
+use std::{collections::HashMap, path::Path, time};
+
+use serde::{Deserialize, Serialize};
+use tokio::fs::File;
+use tokio::time::sleep;
+use tracing::debug;
+
 use crate::{
     model::{
         account_service::ManagerAccount,
@@ -39,25 +46,14 @@ use crate::{
         BootOption, ComputerSystem, InvalidValueError, Manager, OnOff,
     },
     standard::RedfishStandard,
-    Boot, BootOptions, EnabledDisabled, PCIeDevice, PowerState, Redfish, RedfishError, RoleId,
-    Status, StatusInternal, SystemPowerControl,
+    Boot, BootOptions, EnabledDisabled, MachineSetupDiff, MachineSetupStatus, PCIeDevice, PowerState,
+    Redfish, RedfishError, RoleId, Status, StatusInternal, SystemPowerControl,
 };
-use serde::Serialize;
-use std::{collections::HashMap, path::Path, time};
-use tokio::fs::File;
-use tokio::time::sleep;
-use tracing::debug;
 
 const UEFI_PASSWORD_NAME: &str = "SetupPassword";
 
 pub struct Bmc {
     s: RedfishStandard,
-}
-
-impl Bmc {
-    pub fn new(s: RedfishStandard) -> Result<Bmc, RedfishError> {
-        Ok(Bmc { s })
-    }
 }
 
 #[async_trait::async_trait]
@@ -118,20 +114,8 @@ impl Redfish for Bmc {
             apply_time: dell::RedfishSettingsApplyTime::OnReset, // requires reboot to apply
         };
         // dell idrac requires applying all bios settings at once.
-        let machine_settings = dell::MachineBiosAttrs {
-            in_band_manageability_interface: EnabledDisabled::Disabled,
-            uefi_variable_access: dell::UefiVariableAccessSettings::Controlled,
-            serial_comm: dell::SerialCommSettings::OnConRedir,
-            serial_port_address: dell::SerialPortSettings::Com1,
-            ext_serial_connector: dell::SerialPortExtSettings::Serial1,
-            fail_safe_baud: "115200".to_string(),
-            con_term_type: dell::SerialPortTermSettings::Vt100Vt220,
-            redir_after_boot: EnabledDisabled::Enabled,
-            sriov_global_enable: EnabledDisabled::Enabled,
-            tpm_security: OnOff::On,
-            tpm2_hierarchy: dell::Tpm2HierarchySettings::Clear,
-        };
-        let set_machine_attrs = dell::SetMachineBiosAttrs {
+        let machine_settings = self.machine_setup_attrs();
+        let set_machine_attrs = dell::SetBiosAttrs {
             redfish_settings_apply_time: apply_time,
             attributes: machine_settings,
         };
@@ -143,10 +127,137 @@ impl Redfish for Bmc {
             .await
             .map(|_status_code| ())?;
 
+        self.machine_setup_oem().await?;
+
         self.setup_bmc_remote_access().await?;
         // always do system lockdown last.
         self.enable_bmc_lockdown(dell::BootDevices::PXE, false)
             .await
+    }
+
+    async fn machine_setup_status(&self) -> Result<MachineSetupStatus, RedfishError> {
+        let mut diffs = vec![];
+
+        let bios = self.s.bios_attributes().await?;
+        let expected_attrs = self.machine_setup_attrs();
+
+        macro_rules! diff {
+            ($key:literal, $exp:expr, $act:ty) => {
+                let key = $key;
+                let exp = $exp;
+                let Some(act_v) = bios.get(key) else {
+                    return Err(RedfishError::MissingKey {
+                        key: key.to_string(),
+                        url: "bios".to_string(),
+                    });
+                };
+                let act =
+                    <$act>::deserialize(act_v).map_err(|e| RedfishError::JsonDeserializeError {
+                        url: "bios".to_string(),
+                        body: act_v.to_string(),
+                        source: e,
+                    })?;
+                if exp != act {
+                    diffs.push(MachineSetupDiff {
+                        key: key.to_string(),
+                        expected: exp.to_string(),
+                        actual: act.to_string(),
+                    });
+                }
+            };
+        }
+
+        diff!(
+            "InBandManageabilityInterface",
+            expected_attrs.in_band_manageability_interface,
+            EnabledDisabled
+        );
+        diff!(
+            "UefiVariableAccess",
+            expected_attrs.uefi_variable_access,
+            dell::UefiVariableAccessSettings
+        );
+        diff!(
+            "SerialComm",
+            expected_attrs.serial_comm,
+            dell::SerialCommSettings
+        );
+        diff!(
+            "SerialPortAddress",
+            expected_attrs.serial_port_address,
+            dell::SerialPortSettings
+        );
+        diff!(
+            "ExtSerialConnector",
+            expected_attrs.ext_serial_connector,
+            dell::SerialPortExtSettings
+        );
+        diff!("FailSafeBaud", expected_attrs.fail_safe_baud, String);
+        diff!(
+            "ConTermType",
+            expected_attrs.con_term_type,
+            dell::SerialPortTermSettings
+        );
+        diff!(
+            "RedirAfterBoot",
+            expected_attrs.redir_after_boot,
+            EnabledDisabled
+        );
+        diff!(
+            "SriovGlobalEnable",
+            expected_attrs.sriov_global_enable,
+            EnabledDisabled
+        );
+        diff!("TpmSecurity", expected_attrs.tpm_security, OnOff);
+        diff!(
+            "Tpm2Hierarchy",
+            expected_attrs.tpm2_hierarchy,
+            dell::Tpm2HierarchySettings
+        );
+
+        let manager_attrs = self.manager_dell_oem_attributes().await?;
+        let expected = HashMap::from([
+            ("WebServer.1.HostHeaderCheck", "Disabled"),
+            ("IPMILan.1.Enable", "Enabled"),
+        ]);
+        for (key, exp) in expected {
+            let Some(act) = manager_attrs.get(key) else {
+                return Err(RedfishError::MissingKey {
+                    key: key.to_string(),
+                    url: "Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}".to_string(),
+                });
+            };
+            if act != exp {
+                diffs.push(MachineSetupDiff {
+                    key: key.to_string(),
+                    expected: exp.to_string(),
+                    actual: act.to_string(),
+                });
+            }
+        }
+
+        let bmc_remote_access = self.bmc_remote_access_status().await?;
+        if !bmc_remote_access.is_fully_enabled() {
+            diffs.push(MachineSetupDiff {
+                key: "bmc_remote_access".to_string(),
+                expected: "Enabled".to_string(),
+                actual: bmc_remote_access.status.to_string(),
+            });
+        }
+
+        let lockdown = self.lockdown_status().await?;
+        if !lockdown.is_fully_enabled() {
+            diffs.push(MachineSetupDiff {
+                key: "lockdown".to_string(),
+                expected: "Enabled".to_string(),
+                actual: lockdown.status.to_string(),
+            });
+        }
+
+        Ok(MachineSetupStatus {
+            is_done: diffs.is_empty(),
+            diffs,
+        })
     }
 
     /// iDRAC does not suport changing password policy. They support IP blocking instead.
@@ -379,9 +490,9 @@ impl Redfish for Bmc {
         filename: &Path,
         reboot: bool,
     ) -> Result<String, RedfishError> {
-        let firmware = File::open(&filename).await.map_err(|e| {
-            RedfishError::FileError(format!("Could not open file: {}", e.to_string()))
-        })?;
+        let firmware = File::open(&filename)
+            .await
+            .map_err(|e| RedfishError::FileError(format!("Could not open file: {e}")))?;
 
         let parameters = serde_json::to_string(&UpdateParameters::new(reboot)).map_err(|e| {
             RedfishError::JsonSerializeError {
@@ -567,6 +678,9 @@ impl Redfish for Bmc {
 }
 
 impl Bmc {
+    pub fn new(s: RedfishStandard) -> Result<Bmc, RedfishError> {
+        Ok(Bmc { s })
+    }
     // No changes can be applied if there are pending jobs
     async fn delete_job_queue(&self) -> Result<(), RedfishError> {
         // The queue can't be cleared if system lockdown is enabled
@@ -967,6 +1081,33 @@ impl Bmc {
         Ok((v, url.to_string()))
     }
 
+    /// Extra Dell-specific attributes we need to set that are not BIOS attributes
+    async fn machine_setup_oem(&self) -> Result<(), RedfishError> {
+        let manager_id = self.s.manager_id();
+        let url = format!("Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}");
+
+        let mut attributes = HashMap::new();
+        // racadm set idrac.webserver.HostHeaderCheck 0
+        attributes.insert("WebServer.1.HostHeaderCheck", "Disabled".to_string());
+        // racadm set iDRAC.IPMILan.Enable 1
+        attributes.insert("IPMILan.1.Enable", "Enabled".to_string());
+
+        let body = HashMap::from([("Attributes", attributes)]);
+        self.s.client.patch(&url, body).await.map(|_resp| ())
+    }
+
+    async fn manager_dell_oem_attributes(&self) -> Result<serde_json::Value, RedfishError> {
+        let manager_id = self.s.manager_id();
+        let url = format!("Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}");
+        let (_status_code, mut body): (_, HashMap<String, serde_json::Value>) =
+            self.s.client.get(&url).await?;
+        body.remove("Attributes")
+            .ok_or_else(|| RedfishError::MissingKey {
+                key: "Attributes".to_string(),
+                url,
+            })
+    }
+
     // TPM is enabled by default so we never call this.
     #[allow(dead_code)]
     async fn enable_tpm(&self) -> Result<(), RedfishError> {
@@ -1099,6 +1240,22 @@ impl Bmc {
         );
 
         Err(RedfishError::NoContent)
+    }
+
+    fn machine_setup_attrs(&self) -> dell::MachineBiosAttrs {
+        dell::MachineBiosAttrs {
+            in_band_manageability_interface: EnabledDisabled::Disabled,
+            uefi_variable_access: dell::UefiVariableAccessSettings::Controlled,
+            serial_comm: dell::SerialCommSettings::OnConRedir,
+            serial_port_address: dell::SerialPortSettings::Com1,
+            ext_serial_connector: dell::SerialPortExtSettings::Serial1,
+            fail_safe_baud: "115200".to_string(),
+            con_term_type: dell::SerialPortTermSettings::Vt100Vt220,
+            redir_after_boot: EnabledDisabled::Enabled,
+            sriov_global_enable: EnabledDisabled::Enabled,
+            tpm_security: OnOff::On,
+            tpm2_hierarchy: dell::Tpm2HierarchySettings::Clear,
+        }
     }
 }
 

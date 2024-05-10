@@ -28,8 +28,6 @@ use std::{
 use reqwest::Method;
 use tracing::debug;
 
-use crate::model::account_service::ManagerAccount;
-use crate::model::chassis::{Chassis, NetworkAdapter};
 use crate::model::power::Power;
 use crate::model::secure_boot::SecureBoot;
 use crate::model::sel::LogEntry;
@@ -38,11 +36,16 @@ use crate::model::service_root::ServiceRoot;
 use crate::model::software_inventory::SoftwareInventory;
 use crate::model::task::Task;
 use crate::model::thermal::Thermal;
+use crate::model::{account_service::ManagerAccount, service_root::RedfishVendor};
 use crate::model::{power, thermal, BootOption, InvalidValueError, Manager, Managers, ODataId};
 use crate::network::{RedfishHttpClient, REDFISH_ENDPOINT};
 use crate::{
     model, Boot, EnabledDisabled, NetworkDeviceFunction, NetworkPort, PowerState, Redfish, RoleId,
     Status, Systems,
+};
+use crate::{
+    model::chassis::{Chassis, NetworkAdapter},
+    MachineSetupStatus,
 };
 use crate::{BootOptions, PCIeDevice, RedfishError};
 use crate::model::network_device_function::{NetworkDeviceFunction, NetworkDeviceFunctionCollection};
@@ -54,7 +57,7 @@ const UEFI_PASSWORD_NAME: &str = "AdministratorPassword";
 #[derive(Clone)]
 pub struct RedfishStandard {
     pub client: RedfishHttpClient,
-    pub vendor: Option<String>,
+    pub vendor: Option<RedfishVendor>,
     manager_id: String,
     system_id: String,
 }
@@ -164,6 +167,10 @@ impl Redfish for RedfishStandard {
 
     async fn machine_setup(&self) -> Result<(), RedfishError> {
         Err(RedfishError::NotSupported("machine_setup".to_string()))
+    }
+
+    async fn machine_setup_status(&self) -> Result<MachineSetupStatus, RedfishError> {
+        Err(RedfishError::NotSupported("machine_setup_status".to_string()))
     }
 
     async fn set_machine_password_policy(&self) -> Result<(), RedfishError> {
@@ -568,16 +575,16 @@ impl RedfishStandard {
     }
 
     /// Fetch root URL and record the vendor, if any
-    pub fn set_vendor(&mut self, vendor_id: &str) -> Result<Box<dyn crate::Redfish>, RedfishError> {
-        self.vendor = Some(vendor_id.to_string());
-        debug!(
-            "BMC Vendor: {}",
-            self.vendor.as_deref().unwrap_or("Unknown")
-        );
-        match self.vendor.as_deref() {
+    pub fn set_vendor(
+        &mut self,
+        vendor: RedfishVendor,
+    ) -> Result<Box<dyn crate::Redfish>, RedfishError> {
+        self.vendor = Some(vendor);
+        debug!("BMC Vendor: {vendor}");
+        match vendor {
             // nvidia dgx systems may have both ami and nvidia as vendor strings depending on hw
             // ami also ships its bmc fw for other system vendors.
-            Some("AMI") => {
+            RedfishVendor::AMI => {
                 if self.system_id == "DGX" && self.manager_id == "BMC" {
                     Ok(Box::new(crate::nvidia_viking::Bmc::new(self.clone())?))
                 } else {
@@ -587,11 +594,11 @@ impl RedfishStandard {
                     )))
                 }
             }
-            Some("Dell") => Ok(Box::new(crate::dell::Bmc::new(self.clone())?)),
-            Some("HPE") => Ok(Box::new(crate::hpe::Bmc::new(self.clone())?)),
-            Some("Lenovo") => Ok(Box::new(crate::lenovo::Bmc::new(self.clone())?)),
-            Some("Nvidia") => Ok(Box::new(crate::nvidia_dpu::Bmc::new(self.clone())?)),
-            Some("Supermicro") => Ok(Box::new(crate::supermicro::Bmc::new(self.clone())?)),
+            RedfishVendor::Dell => Ok(Box::new(crate::dell::Bmc::new(self.clone())?)),
+            RedfishVendor::Hpe => Ok(Box::new(crate::hpe::Bmc::new(self.clone())?)),
+            RedfishVendor::Lenovo => Ok(Box::new(crate::lenovo::Bmc::new(self.clone())?)),
+            RedfishVendor::Nvidia => Ok(Box::new(crate::nvidia_dpu::Bmc::new(self.clone())?)),
+            RedfishVendor::Supermicro => Ok(Box::new(crate::supermicro::Bmc::new(self.clone())?)),
             _ => Ok(Box::new(self.clone())),
         }
     }
@@ -608,15 +615,14 @@ impl RedfishStandard {
         Ok(())
     }
 
-    /// Create and setup a connection to BMC.
-    pub fn new(client: RedfishHttpClient) -> Result<Self, RedfishError> {
-        let r = Self {
+    /// Create client object
+    pub fn new(client: RedfishHttpClient) -> Self {
+        Self {
             client,
             manager_id: "".to_string(),
             system_id: "".to_string(),
             vendor: None,
-        };
-        Ok(r)
+        }
     }
 
     pub fn system_id(&self) -> &str {
@@ -631,6 +637,18 @@ impl RedfishStandard {
         let url = format!("Systems/{}/BootOptions", self.system_id());
         let (_status_code, body) = self.client.get(&url).await?;
         Ok(body)
+    }
+
+    pub async fn get_first_boot_option(&self) -> Result<BootOption, RedfishError> {
+        let boot_options = self.get_boot_options().await?;
+        let Some(member) = boot_options.members.first() else {
+            return Err(RedfishError::NoContent);
+        };
+        let url = member
+            .odata_id
+            .replace(&format!("/{REDFISH_ENDPOINT}/"), "");
+        let b: BootOption = self.client.get(&url).await?.1;
+        Ok(b)
     }
 
     // The URL differs for Lenovo, but the rest is the same
@@ -787,8 +805,8 @@ impl RedfishStandard {
     ) -> Result<(), RedfishError> {
         let mut url = format!("Systems/{}/Bios/", self.system_id);
 
-        match self.vendor.as_deref() {
-            Some("HPE") => {
+        match self.vendor {
+            Some(RedfishVendor::Hpe) => {
                 url = format!("{}Settings/Actions/Bios.ChangePasswords", url);
             }
             _ => {
