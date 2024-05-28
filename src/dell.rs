@@ -47,6 +47,8 @@ use crate::{
 
 const UEFI_PASSWORD_NAME: &str = "SetupPassword";
 
+const MAX_ACCOUNT_ID: u8 = 16;
+
 pub struct Bmc {
     s: RedfishStandard,
 }
@@ -59,7 +61,32 @@ impl Redfish for Bmc {
         password: &str,
         role_id: RoleId,
     ) -> Result<(), RedfishError> {
-        self.s.create_user(username, password, role_id).await
+        // Find an unused ID
+        // 'root' is typically ID 2 on an iDrac, and ID 1 might be special
+        let mut account_id = 3;
+        let mut is_free = false;
+        while !is_free && account_id <= MAX_ACCOUNT_ID {
+            let a = match self.s.get_account_by_id(&account_id.to_string()).await {
+                Ok(a) => a,
+                Err(_) => {
+                    is_free = true;
+                    break;
+                }
+            };
+            if let Some(false) = a.enabled {
+                is_free = true;
+                break;
+            }
+            account_id += 1;
+        }
+        if !is_free {
+            return Err(RedfishError::TooManyUsers);
+        }
+
+        // Edit that unused account to be ours. That's how iDrac account creation works.
+        self.s
+            .edit_account(account_id, username, password, role_id, true)
+            .await
     }
 
     async fn change_username(&self, old_name: &str, new_name: &str) -> Result<(), RedfishError> {
@@ -281,8 +308,9 @@ impl Redfish for Bmc {
                 self.enable_bmc_lockdown(dell::BootDevices::PXE).await
             }
             Disabled => {
-                self.disable_bmc_lockdown(dell::BootDevices::PXE).await
-                //self.disable_bios_lockdown().await
+                self.disable_bmc_lockdown(dell::BootDevices::PXE).await?;
+                // BIOS lockdown blocks impi, ensure it's disabled even though we never set it
+                self.disable_bios_lockdown().await
             }
         }
     }
@@ -293,7 +321,6 @@ impl Redfish for Bmc {
         let disabled = EnabledDisabled::Disabled.to_string();
 
         // BIOS lockdown
-        /*
         let url = format!("Systems/{}/Bios", self.s.system_id());
         let (_status_code, bios): (_, dell::Bios) = self.s.client.get(&url).await?;
 
@@ -307,7 +334,6 @@ impl Redfish for Bmc {
             && uefi_var == dell::UefiVariableAccessSettings::Controlled.to_string();
         let is_bios_unlocked = in_band == enabled
             && uefi_var == dell::UefiVariableAccessSettings::Standard.to_string();
-        */
 
         // BMC lockdown
 
@@ -350,9 +376,9 @@ impl Redfish for Bmc {
 
         Ok(Status {
             message,
-            status: if is_bmc_locked {
+            status: if is_bios_locked && is_bmc_locked {
                 StatusInternal::Enabled
-            } else if is_bmc_unlocked {
+            } else if is_bios_unlocked && is_bmc_unlocked {
                 StatusInternal::Disabled
             } else {
                 StatusInternal::Partial
@@ -765,28 +791,6 @@ impl Bmc {
             .map(|_status_code| ())
     }
 
-    /* SystemLockdown covers all of this so we don't need it
-    async fn enable_bios_lockdown(&self) -> Result<(), RedfishError> {
-        let apply_time = dell::SetSettingsApplyTime {
-            apply_time: dell::RedfishSettingsApplyTime::OnReset, // requires reboot to apply
-        };
-        let lockdown = dell::BiosLockdownAttrs {
-            in_band_manageability_interface: EnabledDisabled::Disabled,
-            uefi_variable_access: dell::UefiVariableAccessSettings::Controlled,
-        };
-        let set_lockdown_attrs = dell::SetBiosLockdownAttrs {
-            redfish_settings_apply_time: apply_time,
-            attributes: lockdown,
-        };
-        let url = format!("Systems/{}/Bios/Settings/", self.s.system_id());
-        self.s
-            .client
-            .patch(&url, set_lockdown_attrs)
-            .await
-            .map(|_status_code| ())
-    }
-    */
-
     async fn enable_bmc_lockdown(&self, entry: dell::BootDevices) -> Result<(), RedfishError> {
         let apply_time = dell::SetSettingsApplyTime {
             apply_time: dell::RedfishSettingsApplyTime::OnReset,
@@ -832,7 +836,6 @@ impl Bmc {
             .map(|_status_code| ())
     }
 
-    /*
     async fn disable_bios_lockdown(&self) -> Result<(), RedfishError> {
         let apply_time = dell::SetSettingsApplyTime {
             apply_time: dell::RedfishSettingsApplyTime::OnReset, // requires reboot to apply
@@ -852,7 +855,6 @@ impl Bmc {
             .await
             .map(|_status_code| ())
     }
-    */
 
     async fn disable_bmc_lockdown(&self, entry: dell::BootDevices) -> Result<(), RedfishError> {
         let apply_time = dell::SetSettingsApplyTime {
