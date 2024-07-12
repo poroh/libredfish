@@ -39,8 +39,9 @@ use crate::{
         BootOption, ComputerSystem, EnableDisable, InvalidValueError, Manager,
     },
     standard::RedfishStandard,
-    Boot, BootOptions, EnabledDisabled, MachineSetupDiff, MachineSetupStatus, JobState, PCIeDevice, PowerState,
-    Redfish, RedfishError, RoleId, Status, StatusInternal, SystemPowerControl,
+    Boot, BootOptions, Collection, EnabledDisabled, MachineSetupDiff, MachineSetupStatus, JobState,
+    ODataId, PCIeDevice, PowerState, Redfish, RedfishError, Resource, RoleId, Status,
+    StatusInternal, SystemPowerControl,
 };
 
 const MELLANOX_UEFI_HTTP4: &str = "UEFI HTTP IPv4 Mellanox Network Adapter";
@@ -540,6 +541,21 @@ impl Redfish for Bmc {
 
     async fn get_job_state(&self, job_id: &str) -> Result<JobState, RedfishError> {
         self.s.get_job_state(job_id).await
+    }
+
+    async fn get_collection(&self, id: ODataId) -> Result<Collection, RedfishError> {
+        self.s.get_collection(id).await
+    }
+
+    async fn get_resource(&self, id: ODataId) -> Result<Resource, RedfishError> {
+        self.s.get_resource(id).await
+    }
+
+    async fn set_boot_order_dpu_first(
+        &self,
+        mac_address: Option<String>,
+    ) -> Result<(), RedfishError> {
+        self.s.set_boot_order_dpu_first(mac_address).await
     }
 }
 
