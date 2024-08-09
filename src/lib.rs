@@ -343,6 +343,8 @@ pub trait Redfish: Send + Sync + 'static {
     async fn get_update_service(&self) -> Result<UpdateService, RedfishError>;
 
     async fn get_base_mac_address(&self) -> Result<Option<String>, RedfishError>;
+
+    async fn lockdown_bmc(&self, target: EnabledDisabled) -> Result<(), RedfishError>;
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
