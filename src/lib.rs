@@ -118,6 +118,13 @@ pub trait Redfish: Send + Sync + 'static {
     /// Reboot the BMC itself
     async fn bmc_reset(&self) -> Result<(), RedfishError>;
 
+    /// Reset Chassis
+    async fn chassis_reset(
+        &self,
+        chassis_id: &str,
+        reset_type: SystemPowerControl,
+    ) -> Result<(), RedfishError>;
+
     /// Reset BMC to the factory defaults.
     async fn bmc_reset_to_defaults(&self) -> Result<(), RedfishError>;
 
@@ -334,6 +341,8 @@ pub trait Redfish: Send + Sync + 'static {
     ) -> Result<Option<String>, RedfishError>;
 
     async fn get_update_service(&self) -> Result<UpdateService, RedfishError>;
+
+    async fn get_base_mac_address(&self) -> Result<Option<String>, RedfishError>;
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]

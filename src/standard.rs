@@ -159,6 +159,18 @@ impl Redfish for RedfishStandard {
         self.client.post(&url, arg).await.map(|_resp| Ok(()))?
     }
 
+    async fn chassis_reset(
+        &self,
+        chassis_id: &str,
+        reset_type: model::SystemPowerControl,
+    ) -> Result<(), RedfishError> {
+        let url = format!("Chassis/{}/Actions/Chassis.Reset", chassis_id);
+        let mut arg = HashMap::new();
+
+        arg.insert("ResetType", reset_type.to_string());
+        self.client.post(&url, arg).await.map(|_resp| Ok(()))?
+    }
+
     async fn get_thermal_metrics(&self) -> Result<Thermal, RedfishError> {
         let thermal = self.get_thermal_metrics().await?;
         Ok(thermal)
@@ -582,6 +594,12 @@ impl Redfish for RedfishStandard {
     async fn get_update_service(&self) -> Result<UpdateService, RedfishError> {
         let (_, update_service) = self.client.get(self.update_service().as_str()).await?;
         Ok(update_service)
+    }
+
+    async fn get_base_mac_address(&self) -> Result<Option<String>, RedfishError> {
+        Err(RedfishError::NotSupported(
+            "get_base_mac_address".to_string(),
+        ))
     }
 }
 

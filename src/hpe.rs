@@ -108,6 +108,14 @@ impl Redfish for Bmc {
         self.s.bmc_reset().await
     }
 
+    async fn chassis_reset(
+        &self,
+        chassis_id: &str,
+        reset_type: SystemPowerControl,
+    ) -> Result<(), RedfishError> {
+        self.s.chassis_reset(chassis_id, reset_type).await
+    }
+
     async fn get_thermal_metrics(&self) -> Result<Thermal, RedfishError> {
         self.s.get_thermal_metrics().await
     }
@@ -483,6 +491,10 @@ impl Redfish for Bmc {
         current_uefi_password: &str,
     ) -> Result<Option<String>, RedfishError> {
         self.change_uefi_password(current_uefi_password, "").await
+    }
+
+    async fn get_base_mac_address(&self) -> Result<Option<String>, RedfishError> {
+        self.s.get_base_mac_address().await
     }
 }
 

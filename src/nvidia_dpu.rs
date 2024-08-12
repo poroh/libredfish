@@ -138,6 +138,14 @@ impl Redfish for Bmc {
         self.s.bmc_reset().await
     }
 
+    async fn chassis_reset(
+        &self,
+        chassis_id: &str,
+        reset_type: crate::SystemPowerControl,
+    ) -> Result<(), RedfishError> {
+        self.s.chassis_reset(chassis_id, reset_type).await
+    }
+
     async fn get_thermal_metrics(&self) -> Result<crate::Thermal, RedfishError> {
         let (_status_code, body) = self.s.client.get("Chassis/Card1/Thermal/").await?;
         Ok(body)
@@ -563,6 +571,13 @@ impl Redfish for Bmc {
         current_uefi_password: &str,
     ) -> Result<Option<String>, RedfishError> {
         self.change_uefi_password(current_uefi_password, "").await
+    }
+
+    async fn get_base_mac_address(&self) -> Result<Option<String>, RedfishError> {
+        let url = format!("Systems/{}/Oem/Nvidia", self.s.system_id());
+        let (_sc, body): (reqwest::StatusCode, HashMap<String, serde_json::Value>) =
+            self.s.client.get(url.as_str()).await?;
+        Ok(body.get("BaseMAC").map(|v| v.to_string()))
     }
 }
 
