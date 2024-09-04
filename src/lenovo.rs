@@ -33,7 +33,7 @@ use crate::model::oem::lenovo::LenovoBootOrder;
 use crate::model::resource::ResourceCollection;
 use crate::model::service_root::ServiceRoot;
 use crate::model::task::Task;
-use crate::model::update_service::UpdateService;
+use crate::model::update_service::{TransferProtocolType, UpdateService};
 use crate::model::{secure_boot::SecureBoot, ComputerSystem};
 use crate::model::{Manager, PCIeFunction};
 use crate::{
@@ -790,6 +790,17 @@ impl Redfish for Bmc {
         target: crate::EnabledDisabled,
     ) -> Result<(), RedfishError> {
         self.s.enable_ipmi_over_lan(target).await
+    }
+
+    async fn update_firmware_simple_update(
+        &self,
+        image_uri: &str,
+        targets: Vec<String>,
+        transfer_protocol: TransferProtocolType,
+    ) -> Result<Task, RedfishError> {
+        self.s
+            .update_firmware_simple_update(image_uri, targets, transfer_protocol)
+            .await
     }
 }
 
