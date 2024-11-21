@@ -37,6 +37,7 @@ use crate::{
         software_inventory::SoftwareInventory,
         task::Task,
         thermal::Thermal,
+        storage::Drives,
         update_service::{ComponentType, TransferProtocolType, UpdateService},
         BootOption, ComputerSystem, EnableDisable, InvalidValueError, Manager,
     },
@@ -129,6 +130,10 @@ impl Redfish for Bmc {
 
     async fn get_system_event_log(&self) -> Result<Vec<LogEntry>, RedfishError> {
         self.s.get_system_event_log().await
+    }
+
+    async fn get_drives_metrics(&self) -> Result<Vec<Drives>, RedfishError> {
+        self.s.get_drives_metrics().await
     }
 
     async fn bios(&self) -> Result<HashMap<String, serde_json::Value>, RedfishError> {
