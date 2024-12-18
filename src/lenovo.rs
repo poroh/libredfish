@@ -25,18 +25,19 @@ use std::{collections::HashMap, path::Path, time::Duration};
 use reqwest::header::HeaderMap;
 use reqwest::Method;
 use serde::Serialize;
+use serde_json::Value;
 use tokio::fs::File;
 use tracing::debug;
 
 use crate::model::account_service::ManagerAccount;
-use crate::model::oem::lenovo::LenovoBootOrder;
+use crate::model::oem::lenovo::{FrontPanelUSB, LenovoBootOrder};
 use crate::model::resource::ResourceCollection;
 use crate::model::sel::LogService;
 use crate::model::service_root::ServiceRoot;
 use crate::model::task::Task;
 use crate::model::update_service::{ComponentType, TransferProtocolType, UpdateService};
 use crate::model::{secure_boot::SecureBoot, ComputerSystem};
-use crate::model::{Manager, PCIeFunction};
+use crate::model::{InvalidValueError, Manager, PCIeFunction};
 use crate::{
     model::{
         chassis::{Chassis, NetworkAdapter},
@@ -868,16 +869,7 @@ impl Bmc {
         Ok(())
     }
 
-    async fn set_kcs_lenovo(&self, is_allowed: bool) -> Result<(), RedfishError> {
-        let body = HashMap::from([(
-            "Oem",
-            HashMap::from([("Lenovo", HashMap::from([("KCSEnabled", is_allowed)]))]),
-        )]);
-        let url = format!("Managers/{}", self.s.manager_id());
-        self.s.client.patch(&url, body).await.map(|_status_code| ())
-    }
-
-    async fn get_kcs_lenovo(&self) -> Result<bool, RedfishError> {
+    async fn get_kcs_value(&self) -> Result<Value, RedfishError> {
         let url = format!("Managers/{}", self.s.manager_id());
         let (_, body): (_, HashMap<String, serde_json::Value>) = self.s.client.get(&url).await?;
 
@@ -915,15 +907,56 @@ impl Bmc {
             .ok_or_else(|| RedfishError::MissingKey {
                 key: key.to_string(),
                 url: url.to_string(),
-            })?
-            .as_bool()
-            .ok_or_else(|| RedfishError::InvalidKeyType {
-                key: key.to_string(),
-                expected_type: "bool".to_string(),
-                url: url.to_string(),
             })?;
 
-        Ok(is_kcs_enabled)
+        Ok(is_kcs_enabled.clone())
+    }
+
+    async fn set_kcs_lenovo(&self, is_allowed: bool) -> Result<(), RedfishError> {
+        let kcs_val: Value = match self.get_kcs_value().await? {
+            Value::Bool(_) => serde_json::Value::Bool(is_allowed),
+            Value::String(_) => {
+                if is_allowed {
+                    serde_json::Value::String("Enabled".to_owned())
+                } else {
+                    serde_json::Value::String("Disabled".to_owned())
+                }
+            }
+            v => {
+                return Err(RedfishError::InvalidValue {
+                    url: format!("Managers/{}", self.s.manager_id()),
+                    field: format!("KCS"),
+                    err: InvalidValueError(format!(
+                        "expected bool or string as KCS enabled value type; got {v}"
+                    )),
+                })
+            }
+        };
+
+        let body = HashMap::from([(
+            "Oem",
+            HashMap::from([("Lenovo", HashMap::from([("KCSEnabled", kcs_val)]))]),
+        )]);
+        let url = format!("Managers/{}", self.s.manager_id());
+        self.s.client.patch(&url, body).await.map(|_status_code| ())
+    }
+
+    async fn get_kcs_lenovo(&self) -> Result<bool, RedfishError> {
+        let manager = self.get_manager().await?;
+        match &manager.oem {
+            Some(oem) => match &oem.lenovo {
+                Some(lenovo_oem) => Ok(lenovo_oem.kcs_enabled),
+                None => Err(RedfishError::GenericError {
+                    error: format!(
+                        "Manager is missing Lenovo specific OEM field: \n{:#?}",
+                        manager.clone()
+                    ),
+                }),
+            },
+            None => Err(RedfishError::GenericError {
+                error: format!("Manager is missing OEM field: \n{:#?}", manager.clone()),
+            }),
+        }
     }
 
     async fn set_firmware_rollback_lenovo(&self, set: EnabledDisabled) -> Result<(), RedfishError> {
@@ -977,30 +1010,7 @@ impl Bmc {
         Ok(fw_typed)
     }
 
-    async fn set_front_panel_usb_lenovo(
-        &self,
-        mode: lenovo::FrontPanelUSBMode,
-        owner: lenovo::PortSwitchingMode,
-    ) -> Result<(), RedfishError> {
-        let mut body = HashMap::new();
-        body.insert(
-            "Oem",
-            HashMap::from([(
-                "Lenovo",
-                HashMap::from([(
-                    "FrontPanelUSB",
-                    HashMap::from([
-                        ("FPMode", mode.to_string()),
-                        ("PortSwitchingTo", owner.to_string()),
-                    ]),
-                )]),
-            )]),
-        );
-        let url = format!("Systems/{}", self.s.system_id());
-        self.s.client.patch(&url, body).await.map(|_status_code| ())
-    }
-
-    async fn get_front_panel_usb_lenovo(&self) -> Result<lenovo::FrontPanelUSB, RedfishError> {
+    async fn get_front_panel_usb_kv_lenovo(&self) -> Result<(String, FrontPanelUSB), RedfishError> {
         let url = format!("Systems/{}", self.s.system_id());
         let (_, body): (_, HashMap<String, serde_json::Value>) = self.s.client.get(&url).await?;
 
@@ -1032,22 +1042,61 @@ impl Bmc {
                 url: url.to_string(),
             })?;
 
-        let key = "FrontPanelUSB";
-        let fp_usb_val = lenovo_obj
-            .get(key)
-            .ok_or_else(|| RedfishError::MissingKey {
-                key: key.to_string(),
-                url: url.to_string(),
-            })?;
-        let fp_usb = serde_json::from_value(fp_usb_val.clone()).map_err(|err| {
+        let mut front_panel_usb_key = "FrontPanelUSB";
+        let val = match lenovo_obj.get(front_panel_usb_key) {
+            Some(val) => val,
+            None => {
+                front_panel_usb_key = "USBManagementPortAssignment";
+                match lenovo_obj.get(front_panel_usb_key) {
+                    Some(val) => val,
+                    None => {
+                        return Err(RedfishError::MissingKey {
+                            key: front_panel_usb_key.to_string(),
+                            url,
+                        })
+                    }
+                }
+            }
+        };
+
+        let front_panel_usb_val = serde_json::from_value(val.clone()).map_err(|err| {
             RedfishError::JsonDeserializeError {
                 url,
-                body: format!("{fp_usb_val:?}"),
+                body: format!("{val:?}"),
                 source: err,
             }
         })?;
 
-        Ok(fp_usb)
+        Ok((front_panel_usb_key.to_string(), front_panel_usb_val))
+    }
+
+    async fn set_front_panel_usb_lenovo(
+        &self,
+        mode: lenovo::FrontPanelUSBMode,
+        owner: lenovo::PortSwitchingMode,
+    ) -> Result<(), RedfishError> {
+        let mut body = HashMap::new();
+        let (front_panel_usb_key, _) = self.get_front_panel_usb_kv_lenovo().await?;
+        body.insert(
+            "Oem",
+            HashMap::from([(
+                "Lenovo",
+                HashMap::from([(
+                    front_panel_usb_key,
+                    HashMap::from([
+                        ("FPMode", mode.to_string()),
+                        ("PortSwitchingTo", owner.to_string()),
+                    ]),
+                )]),
+            )]),
+        );
+        let url = format!("Systems/{}", self.s.system_id());
+        self.s.client.patch(&url, body).await.map(|_status_code| ())
+    }
+
+    async fn get_front_panel_usb_lenovo(&self) -> Result<lenovo::FrontPanelUSB, RedfishError> {
+        let (_, front_panel_usb_val) = self.get_front_panel_usb_kv_lenovo().await?;
+        Ok(front_panel_usb_val)
     }
 
     async fn set_ethernet_over_usb(&self, is_allowed: bool) -> Result<(), RedfishError> {
@@ -1076,11 +1125,47 @@ impl Bmc {
         Ok(is_allowed)
     }
 
+    /// Both Intel and AMD have virtualization technologies that help fix the issue of x86 instruction
+    /// architecture not being virtualizable.
+    /// get_enable_virtualization_key returns the KEY for enabling virtualization in the bios attributes
+    /// map that the Lenovo's BMC returns when querying the bios attributes registry. The string returned
+    /// will depend on the processors within the given Lenovo. For example, 655v3/675v3s use AMD processors
+    /// whereas, 650v2/670v2s use Intel processors.
+    async fn get_enable_virtualization_key(
+        &self,
+        bios_attributes: &Value,
+    ) -> Result<&str, RedfishError> {
+        const INTEL_ENABLE_VIRTUALIZATION_KEY: &str = "Processors_IntelVirtualizationTechnology";
+        const AMD_ENABLE_VIRTUALIZATION_KEY: &str = "Processors_SVMMode";
+
+        // Intel specific
+        if bios_attributes
+            .get(INTEL_ENABLE_VIRTUALIZATION_KEY)
+            .is_some()
+        {
+            Ok(INTEL_ENABLE_VIRTUALIZATION_KEY)
+        // AMD specific
+        } else if bios_attributes.get(AMD_ENABLE_VIRTUALIZATION_KEY).is_some() {
+            Ok(AMD_ENABLE_VIRTUALIZATION_KEY)
+        } else {
+            return Err(RedfishError::MissingKey {
+                key: format!(
+                    "{}/{}",
+                    INTEL_ENABLE_VIRTUALIZATION_KEY, AMD_ENABLE_VIRTUALIZATION_KEY
+                )
+                .to_string(),
+                url: format!("Systems/{}/Bios", self.s.system_id()),
+            });
+        }
+    }
+
     async fn set_virt_enable(&self) -> Result<(), RedfishError> {
+        let bios = self.s.bios_attributes().await?;
         let mut body = HashMap::new();
+        let enable_virtualization_key = self.get_enable_virtualization_key(&bios).await?;
         body.insert(
             "Attributes",
-            HashMap::from([("Processors_IntelVirtualizationTechnology", "Enabled")]),
+            HashMap::from([(enable_virtualization_key, "Enabled")]),
         );
         let url = format!("Systems/{}/Bios/Pending", self.s.system_id());
         self.s.client.patch(&url, body).await.map(|_status_code| ())
@@ -1088,22 +1173,22 @@ impl Bmc {
 
     async fn get_virt_enabled(&self) -> Result<EnabledDisabled, RedfishError> {
         let bios = self.s.bios_attributes().await?;
-        let key = "Processors_IntelVirtualizationTechnology";
-        let Some(val) = bios.get(key) else {
+        let enable_virtualization_key = self.get_enable_virtualization_key(&bios).await?;
+        let Some(val) = bios.get(enable_virtualization_key) else {
             return Err(RedfishError::MissingKey {
-                key: key.to_string(),
+                key: enable_virtualization_key.to_string(),
                 url: "bios".to_string(),
             });
         };
         let Some(val) = val.as_str() else {
             return Err(RedfishError::InvalidKeyType {
-                key: key.to_string(),
+                key: enable_virtualization_key.to_string(),
                 expected_type: "str".to_string(),
                 url: "bios".to_string(),
             });
         };
         val.parse().map_err(|_e| RedfishError::InvalidKeyType {
-            key: key.to_string(),
+            key: enable_virtualization_key.to_string(),
             expected_type: "EnabledDisabled".to_string(),
             url: "bios".to_string(),
         })

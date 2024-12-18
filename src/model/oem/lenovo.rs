@@ -22,7 +22,8 @@
  */
 use std::{fmt, str::FromStr};
 
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 
 use crate::{
     model::{BiosCommon, ODataId},
@@ -34,10 +35,18 @@ use crate::{
 pub struct Manager {
     pub agentless_capabilities: Vec<String>,
 
-    #[serde(rename = "KCSEnabled")]
+    #[serde(rename = "KCSEnabled", deserialize_with = "deserialize_kcs_enabled")]
     pub kcs_enabled: bool,
 
     pub recipients_settings: RecipientSettings,
+}
+
+fn deserialize_kcs_enabled<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    Ok(match serde::de::Deserialize::deserialize(deserializer)? {
+        Value::Bool(bool) => bool,
+        Value::String(str) => str == "Enabled",
+        _ => return Err(de::Error::custom("Wrong type, expected boolean")),
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -53,7 +62,7 @@ pub struct RecipientSettings {
 pub struct System {
     pub scheduled_power_actions: ODataId,
     #[serde(rename = "FrontPanelUSB")]
-    pub front_panel_usb: FrontPanelUSB,
+    pub front_panel_usb: Option<FrontPanelUSB>,
     pub metrics: ODataId,
     pub system_status: String,
     pub number_of_reboots: i64,
