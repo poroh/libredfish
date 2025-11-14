@@ -32,6 +32,7 @@ use crate::{
         boot,
         certificate::Certificate,
         chassis::{Assembly, Chassis, NetworkAdapter},
+        component_integrity::ComponentIntegrities,
         network_device_function::NetworkDeviceFunction,
         oem::{
             nvidia_dpu::NicMode,
@@ -422,7 +423,7 @@ impl Redfish for Bmc {
     }
 
     async fn pcie_devices(&self) -> Result<Vec<PCIeDevice>, RedfishError> {
-        let Some(chassis_id) = self.get_chassis_all().await?.into_iter().next().take() else {
+        let Some(chassis_id) = self.get_chassis_all().await?.into_iter().next() else {
             return Err(RedfishError::NoContent);
         };
         let url = format!("Chassis/{chassis_id}/PCIeDevices");
@@ -894,6 +895,41 @@ impl Redfish for Bmc {
     async fn is_bios_setup(&self, _boot_interface_mac: Option<&str>) -> Result<bool, RedfishError> {
         let diffs = self.diff_bios_bmc_attr().await?;
         Ok(diffs.is_empty())
+    }
+
+    async fn get_component_integrities(&self) -> Result<ComponentIntegrities, RedfishError> {
+        self.s.get_component_integrities().await
+    }
+
+    async fn get_firmware_for_component(
+        &self,
+        componnent_integrity_id: &str,
+    ) -> Result<crate::model::software_inventory::SoftwareInventory, RedfishError> {
+        self.s
+            .get_firmware_for_component(componnent_integrity_id)
+            .await
+    }
+
+    async fn get_component_ca_certificate(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::CaCertificate, RedfishError> {
+        self.s.get_component_ca_certificate(url).await
+    }
+
+    async fn trigger_evidence_collection(
+        &self,
+        url: &str,
+        nonce: &str,
+    ) -> Result<Task, RedfishError> {
+        self.s.trigger_evidence_collection(url, nonce).await
+    }
+
+    async fn get_evidence(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::Evidence, RedfishError> {
+        self.s.get_evidence(url).await
     }
 }
 

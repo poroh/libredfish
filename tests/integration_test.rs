@@ -407,6 +407,33 @@ async fn run_integration_test(
         }
     }
 
+    if vendor_dir == "nvidia_gb200" {
+        let component_int = redfish.get_component_integrities().await?;
+        assert_eq!(component_int.members.len(), 11);
+
+        let firmware = redfish
+            .get_firmware_for_component("HGX_IRoT_GPU_0")
+            .await
+            .unwrap();
+        let firmare_expected = redfish.get_firmware("HGX_FW_GPU_0").await.unwrap();
+        assert_eq!(firmware.version.unwrap(), firmare_expected.version.unwrap());
+
+        let firmware = redfish
+            .get_firmware_for_component("HGX_IRoT_GPU_1")
+            .await
+            .unwrap();
+        let firmare_expected = redfish.get_firmware("HGX_FW_GPU_1").await.unwrap();
+        assert_eq!(firmware.version.unwrap(), firmare_expected.version.unwrap());
+
+        let firmware = redfish.get_firmware_for_component("ERoT_BMC_0").await;
+        assert!(firmware.is_err());
+    }
+
+    if vendor_dir == "dell" {
+        let firmware = redfish.get_firmware_for_component("ERoT_BMC_0").await;
+        assert!(firmware.is_err());
+    }
+
     test_vendor_collection_count!(
         redfish,
         vendor_dir,

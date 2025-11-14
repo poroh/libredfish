@@ -45,6 +45,7 @@ pub struct ServiceRoot {
     pub account_service: Option<ODataId>,
     pub certificate_service: Option<ODataId>,
     pub chassis: Option<ODataId>,
+    pub component_integrity: Option<ODataId>,
     pub event_service: Option<ODataId>,
     pub license_service: Option<ODataId>,
     pub fabrics: Option<ODataId>,

@@ -44,6 +44,7 @@ pub mod secure_boot;
 pub mod account_service;
 pub mod certificate;
 pub mod chassis;
+pub mod component_integrity;
 pub mod error;
 pub mod ethernet_interface;
 pub mod job;
@@ -164,7 +165,7 @@ impl ODataId {
     pub fn odata_id_get(&self) -> Result<&str, RedfishError> {
         self.odata_id
             .split('/')
-            .last()
+            .next_back()
             .ok_or_else(|| RedfishError::GenericError {
                 error: format!("odata_id have invalid format: {}", self.odata_id),
             })

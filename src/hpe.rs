@@ -29,6 +29,7 @@ use crate::{
         account_service::ManagerAccount,
         certificate::Certificate,
         chassis::{Assembly, Chassis, NetworkAdapter},
+        component_integrity::ComponentIntegrities,
         network_device_function::NetworkDeviceFunction,
         oem::{
             hpe::{self, BootDevices},
@@ -905,6 +906,41 @@ impl Redfish for Bmc {
         let diffs = self.diff_bios_bmc_attr().await?;
         Ok(diffs.is_empty())
     }
+
+    async fn get_component_integrities(&self) -> Result<ComponentIntegrities, RedfishError> {
+        self.s.get_component_integrities().await
+    }
+
+    async fn get_firmware_for_component(
+        &self,
+        componnent_integrity_id: &str,
+    ) -> Result<crate::model::software_inventory::SoftwareInventory, RedfishError> {
+        self.s
+            .get_firmware_for_component(componnent_integrity_id)
+            .await
+    }
+
+    async fn get_component_ca_certificate(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::CaCertificate, RedfishError> {
+        self.s.get_component_ca_certificate(url).await
+    }
+
+    async fn trigger_evidence_collection(
+        &self,
+        url: &str,
+        nonce: &str,
+    ) -> Result<Task, RedfishError> {
+        self.s.trigger_evidence_collection(url, nonce).await
+    }
+
+    async fn get_evidence(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::Evidence, RedfishError> {
+        self.s.get_evidence(url).await
+    }
 }
 
 impl Bmc {
@@ -1004,14 +1040,8 @@ impl Bmc {
         match ilo_manager {
             Ok(manager) => {
                 let fw_parts: Vec<&str> = manager.firmware_version.split_whitespace().collect();
-                let fw_major: i32 = match fw_parts[1].parse() {
-                    Ok(n) => n,
-                    Err(_) => 0,
-                };
-                let fw_minor: f32 = match (&fw_parts[2][1..]).parse() {
-                    Ok(f) => f,
-                    Err(_) => 0.0,
-                };
+                let fw_major: i32 = fw_parts[1].parse().unwrap_or_default();
+                let fw_minor: f32 = fw_parts[2][1..].parse().unwrap_or(0.0);
                 fw_major >= 6 && fw_minor >= 1.40
             }
             Err(_) => false,
@@ -1104,14 +1134,14 @@ impl Bmc {
         } else if bios_attributes.get(AMD_ENABLE_VIRTUALIZATION_KEY).is_some() {
             Ok(AMD_ENABLE_VIRTUALIZATION_KEY)
         } else {
-            return Err(RedfishError::MissingKey {
+            Err(RedfishError::MissingKey {
                 key: format!(
                     "{}/{}",
                     INTEL_ENABLE_VIRTUALIZATION_KEY, AMD_ENABLE_VIRTUALIZATION_KEY
                 )
                 .to_string(),
                 url: format!("Systems/{}/Bios", self.s.system_id()),
-            });
+            })
         }
     }
 

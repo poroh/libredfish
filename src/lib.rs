@@ -54,6 +54,7 @@ pub mod standard;
 pub use error::RedfishError;
 
 use crate::model::certificate::Certificate;
+use crate::model::component_integrity::ComponentIntegrities;
 use crate::model::power::Power;
 use crate::model::sel::LogEntry;
 use crate::model::storage::Drives;
@@ -506,6 +507,37 @@ pub trait Redfish: Send + Sync + 'static {
 
     /// Check if the boot order is configured as we expect (Network boot)
     async fn is_boot_order_setup(&self, mac_address: &str) -> Result<bool, RedfishError>;
+
+    /// Returns info about component integrity
+    async fn get_component_integrities(&self) -> Result<ComponentIntegrities, RedfishError>;
+
+    /// Returns info about component integrity
+    async fn get_firmware_for_component(
+        &self,
+        component_integrity_id: &str,
+    ) -> Result<SoftwareInventory, RedfishError>;
+
+    /// Component/evidence apis are taking URL as of now since not sure if all vendors keep
+    /// certificate and evidence in chassis/same place. Once tested with all vendors, the url can
+    /// be changed into id and device parameters.
+    /// Fetches component certificate
+    async fn get_component_ca_certificate(
+        &self,
+        url: &str,
+    ) -> Result<model::component_integrity::CaCertificate, RedfishError>;
+
+    /// Trigger evidence collection
+    async fn trigger_evidence_collection(
+        &self,
+        url: &str,
+        nonce: &str,
+    ) -> Result<Task, RedfishError>;
+
+    /// Fetches component certificate
+    async fn get_evidence(
+        &self,
+        url: &str,
+    ) -> Result<model::component_integrity::Evidence, RedfishError>;
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]

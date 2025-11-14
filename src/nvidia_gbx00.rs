@@ -1,6 +1,3 @@
-use crate::model::certificate::Certificate;
-use crate::model::oem::nvidia_dpu::NicMode;
-use crate::model::storage::DriveCollection;
 /*
  * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
@@ -24,14 +21,20 @@ use crate::model::storage::DriveCollection;
  * DEALINGS IN THE SOFTWARE.
  */
 use crate::{Chassis, EnabledDisabled, REDFISH_ENDPOINT};
+use regex::Regex;
 use reqwest::StatusCode;
 use serde::Serialize;
+use std::sync::OnceLock;
 use std::{collections::HashMap, path::Path, time::Duration};
 use tokio::fs::File;
 
 use crate::model::account_service::ManagerAccount;
+use crate::model::certificate::Certificate;
+use crate::model::component_integrity::{ComponentIntegrities, RegexToFirmwareIdOptions};
+use crate::model::oem::nvidia_dpu::NicMode;
 use crate::model::sensor::{GPUSensors, Sensor, Sensors};
 use crate::model::service_root::RedfishVendor;
+use crate::model::storage::DriveCollection;
 use crate::model::task::Task;
 use crate::model::thermal::Fan;
 use crate::model::update_service::{ComponentType, TransferProtocolType, UpdateService};
@@ -86,12 +89,25 @@ enum BootOptionMatchField {
 }
 
 impl BootOptionMatchField {
-    fn to_string(self) -> &'static str {
+    fn to_string(&self) -> &'static str {
         match self {
             BootOptionMatchField::DisplayName => "Display Name",
             BootOptionMatchField::UefiDevicePath => "Uefi Device Path",
         }
     }
+}
+
+// Supported component to firmware mapping.
+// GPU, Source: HGX_IRoT_GPU_X Target: HGX_FW_GPU_X
+fn get_component_integrity_id_to_firmware_inventory_id_options(
+) -> &'static Vec<RegexToFirmwareIdOptions> {
+    static RE: OnceLock<Vec<RegexToFirmwareIdOptions>> = OnceLock::new();
+    RE.get_or_init(|| {
+        vec![RegexToFirmwareIdOptions {
+            id_prefix: "HGX_FW_",
+            pattern: Regex::new(r"HGX_IRoT_(GPU_\d+)").unwrap(),
+        }]
+    })
 }
 
 #[async_trait::async_trait]
@@ -254,7 +270,7 @@ impl Redfish for Bmc {
                 .s
                 .client
                 .post(
-                    &"Chassis/BMC_0/Actions/Oem/NvidiaChassis.AuxPowerReset".to_string(),
+                    "Chassis/BMC_0/Actions/Oem/NvidiaChassis.AuxPowerReset",
                     args,
                 )
                 .await
@@ -338,9 +354,9 @@ impl Redfish for Bmc {
                                 let drive_id = drive
                                     .odata_id
                                     .split('/')
-                                    .last()?
+                                    .next_back()?
                                     .split('_')
-                                    .last()?
+                                    .next_back()?
                                     .parse::<u32>()
                                     .ok()?;
 
@@ -1003,6 +1019,66 @@ impl Redfish for Bmc {
         let diffs = self.diff_bios_bmc_attr().await?;
         Ok(diffs.is_empty())
     }
+
+    async fn get_component_integrities(&self) -> Result<ComponentIntegrities, RedfishError> {
+        self.s.get_component_integrities().await
+    }
+
+    async fn get_firmware_for_component(
+        &self,
+        component_integrity_id: &str,
+    ) -> Result<crate::model::software_inventory::SoftwareInventory, RedfishError> {
+        let mut id = None;
+
+        for value in get_component_integrity_id_to_firmware_inventory_id_options() {
+            if let Some(capture) = value.pattern.captures(component_integrity_id) {
+                id = Some(format!(
+                    "{}{}",
+                    value.id_prefix,
+                    capture
+                        .get(1)
+                        .ok_or_else(|| RedfishError::GenericError {
+                            error: format!(
+                                "Empty capture for {}, id_prefix: {}",
+                                component_integrity_id, value.id_prefix
+                            )
+                        })?
+                        .as_str()
+                ));
+                break;
+            }
+        }
+
+        let Some(id) = id else {
+            return Err(RedfishError::NotSupported(format!(
+                "No component match for {}",
+                component_integrity_id
+            )));
+        };
+        self.get_firmware(&id).await
+    }
+
+    async fn get_component_ca_certificate(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::CaCertificate, RedfishError> {
+        self.s.get_component_ca_certificate(url).await
+    }
+
+    async fn trigger_evidence_collection(
+        &self,
+        url: &str,
+        nonce: &str,
+    ) -> Result<Task, RedfishError> {
+        self.s.trigger_evidence_collection(url, nonce).await
+    }
+
+    async fn get_evidence(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::Evidence, RedfishError> {
+        self.s.get_evidence(url).await
+    }
 }
 
 impl Bmc {
@@ -1229,13 +1305,84 @@ impl UpdateParameters {
                 ComponentType::EROTBIOS => {
                     "/redfish/v1/UpdateService/FirmwareInventory/EROT_BIOS_0".to_string()
                 }
-                ComponentType::HGXBMC => "/redfish/v1/Chassis/HGX_Chassis_0".to_string(),
+                ComponentType::HGXBMC | ComponentType::UEFI => {
+                    "/redfish/v1/Chassis/HGX_Chassis_0".to_string()
+                }
                 _ => "unreachable".to_string(),
             }]),
         };
         UpdateParameters {
             targets,
             force_update: true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_update_parameters_targets_all_variants() {
+        let cases: Vec<(ComponentType, Option<Vec<String>>)> = vec![
+            (ComponentType::Unknown, None),
+            (
+                ComponentType::BMC,
+                Some(vec!["/redfish/v1/Chassis/BMC_0".to_string()]),
+            ),
+            (
+                ComponentType::EROTBMC,
+                Some(vec!["/redfish/v1/Chassis/HGX_ERoT_BMC_0".to_string()]),
+            ),
+            (
+                ComponentType::EROTBIOS,
+                Some(vec![
+                    "/redfish/v1/UpdateService/FirmwareInventory/EROT_BIOS_0".to_string(),
+                ]),
+            ),
+            (
+                ComponentType::HGXBMC,
+                Some(vec!["/redfish/v1/Chassis/HGX_Chassis_0".to_string()]),
+            ),
+            (
+                ComponentType::UEFI,
+                Some(vec!["/redfish/v1/Chassis/HGX_Chassis_0".to_string()]),
+            ),
+            (
+                ComponentType::CPLDMID,
+                Some(vec!["unreachable".to_string()]),
+            ),
+            (ComponentType::CPLDMB, Some(vec!["unreachable".to_string()])),
+            (
+                ComponentType::CPLDPDB,
+                Some(vec!["unreachable".to_string()]),
+            ),
+            (
+                ComponentType::PSU { num: 1 },
+                Some(vec!["unreachable".to_string()]),
+            ),
+            (
+                ComponentType::PCIeSwitch { num: 2 },
+                Some(vec!["unreachable".to_string()]),
+            ),
+            (
+                ComponentType::PCIeRetimer { num: 3 },
+                Some(vec!["unreachable".to_string()]),
+            ),
+        ];
+
+        for (component, expected_targets) in cases {
+            let params = UpdateParameters::new(component.clone());
+            assert_eq!(
+                params.targets, expected_targets,
+                "Failed for component: {:?}",
+                component
+            );
+            assert!(
+                params.force_update,
+                "Force update not true for: {:?}",
+                component
+            );
         }
     }
 }

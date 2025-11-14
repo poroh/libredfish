@@ -29,6 +29,7 @@ use tokio::fs::File;
 
 use crate::model::account_service::ManagerAccount;
 use crate::model::certificate::Certificate;
+use crate::model::component_integrity::ComponentIntegrities;
 use crate::model::oem::nvidia_dpu::NicMode;
 use crate::model::sensor::GPUSensors;
 use crate::model::service_root::RedfishVendor;
@@ -821,6 +822,41 @@ impl Redfish for Bmc {
     async fn is_bios_setup(&self, boot_interface_mac: Option<&str>) -> Result<bool, RedfishError> {
         let status = self.machine_setup_status(boot_interface_mac).await?;
         Ok(status.is_done)
+    }
+
+    async fn get_component_integrities(&self) -> Result<ComponentIntegrities, RedfishError> {
+        self.s.get_component_integrities().await
+    }
+
+    async fn get_firmware_for_component(
+        &self,
+        componnent_integrity_id: &str,
+    ) -> Result<crate::model::software_inventory::SoftwareInventory, RedfishError> {
+        self.s
+            .get_firmware_for_component(componnent_integrity_id)
+            .await
+    }
+
+    async fn get_component_ca_certificate(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::CaCertificate, RedfishError> {
+        self.s.get_component_ca_certificate(url).await
+    }
+
+    async fn trigger_evidence_collection(
+        &self,
+        url: &str,
+        nonce: &str,
+    ) -> Result<Task, RedfishError> {
+        self.s.trigger_evidence_collection(url, nonce).await
+    }
+
+    async fn get_evidence(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::Evidence, RedfishError> {
+        self.s.get_evidence(url).await
     }
 }
 

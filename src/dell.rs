@@ -32,6 +32,7 @@ use crate::{
         account_service::ManagerAccount,
         certificate::Certificate,
         chassis::{Assembly, Chassis, NetworkAdapter},
+        component_integrity::ComponentIntegrities,
         network_device_function::NetworkDeviceFunction,
         oem::{
             dell::{self, ShareParameters, StorageCollection, SystemConfiguration},
@@ -1051,6 +1052,41 @@ impl Redfish for Bmc {
         let diffs = self.diff_bios_bmc_attr(boot_interface_mac).await?;
         Ok(diffs.is_empty())
     }
+
+    async fn get_component_integrities(&self) -> Result<ComponentIntegrities, RedfishError> {
+        self.s.get_component_integrities().await
+    }
+
+    async fn get_firmware_for_component(
+        &self,
+        componnent_integrity_id: &str,
+    ) -> Result<crate::model::software_inventory::SoftwareInventory, RedfishError> {
+        self.s
+            .get_firmware_for_component(componnent_integrity_id)
+            .await
+    }
+
+    async fn get_component_ca_certificate(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::CaCertificate, RedfishError> {
+        self.s.get_component_ca_certificate(url).await
+    }
+
+    async fn trigger_evidence_collection(
+        &self,
+        url: &str,
+        nonce: &str,
+    ) -> Result<Task, RedfishError> {
+        self.s.trigger_evidence_collection(url, nonce).await
+    }
+
+    async fn get_evidence(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::Evidence, RedfishError> {
+        self.s.get_evidence(url).await
+    }
 }
 
 impl Bmc {
@@ -1774,7 +1810,7 @@ impl Bmc {
         // We want to disable all boot options other than HTTP Device 1.
         let boot_options_to_disable_arr: Vec<&str> = curr_enabled_boot_options
             .split(",")
-            .filter(|boot_option| boot_option.as_ref() != "NIC.HttpDevice.1-1".to_string())
+            .filter(|boot_option| *boot_option != "NIC.HttpDevice.1-1")
             .collect();
         let boot_options_to_disable_str = boot_options_to_disable_arr.join(",");
 
@@ -1839,7 +1875,7 @@ impl Bmc {
                 err: InvalidValueError(e.to_string()),
             })?
             .split('/')
-            .last()
+            .next_back()
             .ok_or_else(|| RedfishError::InvalidValue {
                 url: url.to_string(),
                 field: key.to_string(),
@@ -1980,13 +2016,13 @@ impl Bmc {
     }
 
     async fn get_boss_controller(&self) -> Result<Option<String>, RedfishError> {
-        let url: String = format!("Systems/System.Embedded.1/Storage");
+        let url = "Systems/System.Embedded.1/Storage";
         let (_status_code, storage_collection): (_, StorageCollection) =
-            self.s.client.get(&url).await?;
+            self.s.client.get(url).await?;
         for controller in storage_collection.members {
             if controller.odata_id.contains("BOSS") {
                 let boss_controller_id =
-                    controller.odata_id.split('/').last().ok_or_else(|| {
+                    controller.odata_id.split('/').next_back().ok_or_else(|| {
                         RedfishError::InvalidValue {
                             url: url.to_string(),
                             field: "odata_id".to_string(),
@@ -2000,7 +2036,7 @@ impl Bmc {
             }
         }
 
-        return Ok(None);
+        Ok(None)
     }
 
     async fn decommission_controller(&self, controller_id: &str) -> Result<String, RedfishError> {
@@ -2039,7 +2075,7 @@ impl Bmc {
         raid_type: &str,
         drive_info: Value,
     ) -> Result<String, RedfishError> {
-        if volume_name.len() > 15 || volume_name.len() < 1 {
+        if volume_name.len() > 15 || volume_name.is_empty() {
             return Err(RedfishError::GenericError {
                 error: format!(
                     "invalid volume name ({volume_name}); must be between 1 and 15 characters long"
@@ -2119,7 +2155,7 @@ impl Bmc {
     async fn get_boot_order(&self) -> Result<Vec<BootOption>, RedfishError> {
         let boot_options = self.get_boot_options().await?;
         let mut boot_order: Vec<BootOption> = Vec::new();
-        for (_, boot_option) in boot_options.members.iter().enumerate() {
+        for boot_option in boot_options.members.iter() {
             let id = boot_option.odata_id_get()?;
             let boot_option = self.get_boot_option(id).await?;
             boot_order.push(boot_option)

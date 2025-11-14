@@ -28,6 +28,7 @@ use tracing::debug;
 
 use crate::model::certificate::Certificate;
 use crate::model::chassis::Assembly;
+use crate::model::component_integrity::ComponentIntegrities;
 use crate::model::service_root::ServiceRoot;
 use crate::model::software_inventory::SoftwareInventory;
 use crate::model::task::Task;
@@ -144,7 +145,6 @@ impl Redfish for RedfishStandard {
             .and_then(|c| c.try_get::<ManagerAccount>())
             .into_iter()
             .flat_map(|rc| rc.members)
-            .map(Into::into)
             .collect();
 
         accounts.sort();
@@ -622,7 +622,7 @@ impl Redfish for RedfishStandard {
                 d.odata_id
                     .trim_matches('/')
                     .split('/')
-                    .last()
+                    .next_back()
                     .unwrap()
                     .to_string()
             })
@@ -651,7 +651,7 @@ impl Redfish for RedfishStandard {
                 d.odata_id
                     .trim_matches('/')
                     .split('/')
-                    .last()
+                    .next_back()
                     .unwrap()
                     .to_string()
             })
@@ -855,6 +855,57 @@ impl Redfish for RedfishStandard {
 
     async fn is_bios_setup(&self, _boot_interface_mac: Option<&str>) -> Result<bool, RedfishError> {
         Err(RedfishError::NotSupported("is_bios_setup".to_string()))
+    }
+
+    async fn get_component_integrities(&self) -> Result<ComponentIntegrities, RedfishError> {
+        let url = "ComponentIntegrity?$expand=.($levels=1)";
+        let (_status_code, body) = self.client.get(url).await?;
+        Ok(body)
+    }
+
+    async fn get_firmware_for_component(
+        &self,
+        _component_integrity_id: &str,
+    ) -> Result<SoftwareInventory, RedfishError> {
+        Err(RedfishError::NotSupported(
+            "Not implemented for the given vendor.".to_string(),
+        ))
+    }
+
+    async fn get_component_ca_certificate(
+        &self,
+        url: &str,
+    ) -> Result<model::component_integrity::CaCertificate, RedfishError> {
+        let url = url.replace("/redfish/v1/", "");
+        let (_status_code, body) = self.client.get(&url).await?;
+        Ok(body)
+    }
+
+    async fn trigger_evidence_collection(
+        &self,
+        url: &str,
+        nonce: &str,
+    ) -> Result<Task, RedfishError> {
+        let url = url.replace("/redfish/v1/", "");
+        let mut arg = HashMap::new();
+        arg.insert("Nonce", nonce.to_string());
+        let (_status_code, resp_opt, _) = self
+            .client
+            .req::<Task, _>(Method::POST, &url, Some(arg), None, None, Vec::new())
+            .await?;
+        match resp_opt {
+            Some(response_body) => Ok(response_body),
+            None => Err(RedfishError::NoContent),
+        }
+    }
+
+    async fn get_evidence(
+        &self,
+        url: &str,
+    ) -> Result<model::component_integrity::Evidence, RedfishError> {
+        let url = format!("{}/data", url.replace("/redfish/v1/", ""));
+        let (_status_code, body) = self.client.get(&url).await?;
+        Ok(body)
     }
 }
 
@@ -1218,7 +1269,6 @@ impl RedfishStandard {
             .and_then(|c| c.try_get::<Storage>())
             .into_iter()
             .flat_map(|rc| rc.members)
-            .map(Into::into)
             .collect();
 
         for storage in storages {
@@ -1300,7 +1350,6 @@ impl RedfishStandard {
                 .and_then(|c| c.try_get::<PCIeDevice>())
                 .into_iter()
                 .flat_map(|rc| rc.members)
-                .map(Into::into)
                 .filter(|d: &PCIeDevice| {
                     d.id.is_some()
                         && d.manufacturer.is_some()

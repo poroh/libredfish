@@ -34,6 +34,7 @@ use tracing::debug;
 
 use crate::model::account_service::ManagerAccount;
 use crate::model::certificate::Certificate;
+use crate::model::component_integrity::ComponentIntegrities;
 use crate::model::oem::lenovo::{BootSettings, FrontPanelUSB, LenovoBootOrder};
 use crate::model::oem::nvidia_dpu::NicMode;
 use crate::model::sel::LogService;
@@ -601,7 +602,7 @@ impl Redfish for Bmc {
         // Lenovo prepends the last two characters of their "Build/Vendor" ID and a dash to most of the versions.  This confuses things, so trim off anything that's before a dash.
         inv.version = inv
             .version
-            .map(|x| x.split('-').last().unwrap_or("").to_string());
+            .map(|x| x.split('-').next_back().unwrap_or("").to_string());
         Ok(inv)
     }
 
@@ -1022,6 +1023,41 @@ impl Redfish for Bmc {
         let diffs = self.diff_bios_bmc_attr().await?;
         Ok(diffs.is_empty())
     }
+
+    async fn get_component_integrities(&self) -> Result<ComponentIntegrities, RedfishError> {
+        self.s.get_component_integrities().await
+    }
+
+    async fn get_firmware_for_component(
+        &self,
+        componnent_integrity_id: &str,
+    ) -> Result<crate::model::software_inventory::SoftwareInventory, RedfishError> {
+        self.s
+            .get_firmware_for_component(componnent_integrity_id)
+            .await
+    }
+
+    async fn get_component_ca_certificate(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::CaCertificate, RedfishError> {
+        self.s.get_component_ca_certificate(url).await
+    }
+
+    async fn trigger_evidence_collection(
+        &self,
+        url: &str,
+        nonce: &str,
+    ) -> Result<Task, RedfishError> {
+        self.s.trigger_evidence_collection(url, nonce).await
+    }
+
+    async fn get_evidence(
+        &self,
+        url: &str,
+    ) -> Result<crate::model::component_integrity::Evidence, RedfishError> {
+        self.s.get_evidence(url).await
+    }
 }
 
 impl Bmc {
@@ -1408,14 +1444,14 @@ impl Bmc {
         } else if bios_attributes.get(AMD_ENABLE_VIRTUALIZATION_KEY).is_some() {
             Ok(AMD_ENABLE_VIRTUALIZATION_KEY)
         } else {
-            return Err(RedfishError::MissingKey {
+            Err(RedfishError::MissingKey {
                 key: format!(
                     "{}/{}",
                     INTEL_ENABLE_VIRTUALIZATION_KEY, AMD_ENABLE_VIRTUALIZATION_KEY
                 )
                 .to_string(),
                 url: format!("Systems/{}/Bios", self.s.system_id()),
-            });
+            })
         }
     }
 

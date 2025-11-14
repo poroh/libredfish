@@ -104,7 +104,7 @@ impl Resource {
                 odata_type = x.to_string();
                 x.to_string()
                     .split('.')
-                    .last()
+                    .next_back()
                     .unwrap_or_default()
                     .to_string()
                     .replace('"', "")
@@ -248,7 +248,7 @@ impl Collection {
         let actual_type = odata
             .odata_type
             .split('.')
-            .last()
+            .next_back()
             .unwrap_or_default()
             .replace("Collection", "");
         if expected_type_name == actual_type {
