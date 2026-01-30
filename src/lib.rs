@@ -58,6 +58,10 @@ pub use network::{Endpoint, RedfishClientPool, RedfishClientPoolBuilder, REDFISH
 pub mod standard;
 pub use error::RedfishError;
 
+/// Reexported of reqwest for types needed in
+/// RedfishClientPoolBuilder.
+pub use reqwest;
+
 use crate::model::certificate::Certificate;
 use crate::model::component_integrity::ComponentIntegrities;
 use crate::model::power::Power;
