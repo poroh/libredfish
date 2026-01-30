@@ -28,7 +28,7 @@ use reqwest::{
     Client as HttpClient, ClientBuilder as HttpClientBuilder, Method, Proxy, StatusCode,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use tracing::debug;
+use tracing::{debug, Instrument};
 
 use crate::model::service_root::RedfishVendor;
 use crate::{model::InvalidValueError, standard::RedfishStandard, Redfish, RedfishError};
@@ -394,23 +394,34 @@ impl RedfishHttpClient {
         custom_headers.extend_from_slice(&self.custom_headers);
 
         let is_file = file.is_some();
-        match self
-            ._req(&method, api, &body, override_timeout, file, &custom_headers)
-            .await
-        {
-            Ok(x) => Ok(x),
-            // HPE sends RST in case same connection is reused. To avoid that let's retry.
-            Err(a) if matches!(a, RedfishError::NetworkError { .. }) => {
-                // Handling of post_file failure must be done manually. The seek is moved and we
-                // can't reuse file by cloning. Clone shares read, writes and seek.
-                if is_file {
-                    return Err(a);
+
+        // Create a span with explicitly NO parent to isolate HTTP operations.
+        // This prevents hyper-util's background tasks from capturing our caller's spans.
+        // See: hyper-util's TokioExecutor uses .in_current_span() when tracing feature is enabled,
+        // which causes span "bouncing" between tasks and delayed span closure.
+        let isolated_span = tracing::trace_span!(parent: None, "http_isolated");
+
+        async {
+            match self
+                ._req(&method, api, &body, override_timeout, file, &custom_headers)
+                .await
+            {
+                Ok(x) => Ok(x),
+                // HPE sends RST in case same connection is reused. To avoid that let's retry.
+                Err(a) if matches!(a, RedfishError::NetworkError { .. }) => {
+                    // Handling of post_file failure must be done manually. The seek is moved and we
+                    // can't reuse file by cloning. Clone shares read, writes and seek.
+                    if is_file {
+                        return Err(a);
+                    }
+                    self._req(&method, api, &body, override_timeout, None, &custom_headers)
+                        .await
                 }
-                self._req(&method, api, &body, override_timeout, None, &custom_headers)
-                    .await
+                Err(x) => Err(x),
             }
-            Err(x) => Err(x),
         }
+        .instrument(isolated_span)
+        .await
     }
 
     // All the HTTP requests happen from here.
@@ -487,7 +498,7 @@ impl RedfishHttpClient {
                             "Invalid custom header {} value: {}, error: {}",
                             key, val, e
                         )),
-                    })
+                    });
                 }
             };
             req_b = req_b.header(key, value);
