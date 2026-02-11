@@ -407,17 +407,21 @@ impl RedfishHttpClient {
                 .await
             {
                 Ok(x) => Ok(x),
-                // HPE sends RST in case same connection is reused. To avoid that let's retry.
-                Err(a) if matches!(a, RedfishError::NetworkError { .. }) => {
-                    // Handling of post_file failure must be done manually. The seek is moved and we
-                    // can't reuse file by cloning. Clone shares read, writes and seek.
-                    if is_file {
-                        return Err(a);
+                // post_file failure must be done manually. The seek is moved and we
+                // can't reuse file by cloning. Clone shares read, writes and seek.
+                Err(err) if is_file => Err(err),
+                // Avoid doubling of timeouts. It is specifically important if caller relies on
+                // timing of this call.
+                Err(RedfishError::NetworkError { source, url }) => {
+                    if source.is_timeout() {
+                        Err(RedfishError::NetworkError { source, url })
+                    } else {
+                        // HPE sends RST in case same connection is reused. To avoid that let's retry.
+                        self._req(&method, api, &body, override_timeout, None, &custom_headers)
+                            .await
                     }
-                    self._req(&method, api, &body, override_timeout, None, &custom_headers)
-                        .await
                 }
-                Err(x) => Err(x),
+                Err(err) => Err(err),
             }
         }
         .instrument(isolated_span)
