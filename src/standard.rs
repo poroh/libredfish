@@ -941,13 +941,25 @@ impl Redfish for RedfishStandard {
         Ok(body)
     }
 
-    async fn set_host_privilege_level(&self, _level: HostPrivilegeLevel) -> Result<(), RedfishError> {
-        Err(RedfishError::NotSupported("set_host_privilege_level".to_string()))
+    async fn set_host_privilege_level(
+        &self,
+        _level: HostPrivilegeLevel,
+    ) -> Result<(), RedfishError> {
+        Err(RedfishError::NotSupported(
+            "set_host_privilege_level".to_string(),
+        ))
     }
 
     async fn set_utc_timezone(&self) -> Result<(), RedfishError> {
         // No-op for non-Dell vendors
         Ok(())
+    }
+
+    async fn disable_psu_hot_spare(&self) -> Result<(), RedfishError> {
+        // PSU Hot Spare is Dell-specific; other vendors handle PSU redundancy differently
+        Err(RedfishError::NotSupported(
+            "disable_psu_hot_spare".to_string(),
+        ))
     }
 }
 

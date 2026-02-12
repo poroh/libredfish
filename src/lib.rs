@@ -549,13 +549,29 @@ pub trait Redfish: Send + Sync + 'static {
         url: &str,
     ) -> Result<model::component_integrity::Evidence, RedfishError>;
 
-     // Sets the host privilege level for a DPU
-     async fn set_host_privilege_level(&self, level: HostPrivilegeLevel) -> Result<(), RedfishError>;
+    // Sets the host privilege level for a DPU
+    async fn set_host_privilege_level(&self, level: HostPrivilegeLevel)
+        -> Result<(), RedfishError>;
 
-     // Sets the timezone to UTC
-     // Only applicable to Dells
-     async fn set_utc_timezone(&self) -> Result<(), RedfishError>;
+    // Sets the timezone to UTC
+    // Only applicable to Dells
+    async fn set_utc_timezone(&self) -> Result<(), RedfishError>;
 
+    /// Disables PSU Hot Spare mode on Dell PowerEdge servers.
+    ///
+    /// This ensures even power distribution across all PSUs instead of
+    /// prioritizing 2 of 4 PSUs in Hot Spare mode.
+    ///
+    /// Specifically sets Dell iDRAC attribute: `ServerPwr.1.PSRapidOn = "Disabled"`
+    ///
+    /// # Returns
+    /// - `Ok(())` if successfully disabled (Dell only)
+    /// - `Err(RedfishError::NotSupported)` for non-Dell vendors
+    /// - `Err(RedfishError)` if the PATCH operation fails
+    ///
+    /// # Note
+    /// Only applicable to Dell servers. Other vendors return `NotSupported`.
+    async fn disable_psu_hot_spare(&self) -> Result<(), RedfishError>;
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]

@@ -1096,12 +1096,19 @@ impl Redfish for Bmc {
         self.s.get_evidence(url).await
     }
 
-    async fn set_host_privilege_level(&self, level: HostPrivilegeLevel) -> Result<(), RedfishError> {
+    async fn set_host_privilege_level(
+        &self,
+        level: HostPrivilegeLevel,
+    ) -> Result<(), RedfishError> {
         self.s.set_host_privilege_level(level).await
     }
 
     async fn set_utc_timezone(&self) -> Result<(), RedfishError> {
         self.s.set_utc_timezone().await
+    }
+
+    async fn disable_psu_hot_spare(&self) -> Result<(), RedfishError> {
+        self.s.disable_psu_hot_spare().await
     }
 }
 

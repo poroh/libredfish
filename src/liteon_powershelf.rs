@@ -4,6 +4,8 @@ use std::{collections::HashMap, path::Path, time::Duration};
 use tokio::fs::File;
 
 use crate::model::account_service::ManagerAccount;
+use crate::model::certificate::Certificate;
+use crate::model::component_integrity::ComponentIntegrities;
 use crate::model::oem::nvidia_dpu::{HostPrivilegeLevel, NicMode};
 use crate::model::power::{Power, PowerSupplies, PowerSupply, Voltages};
 use crate::model::sensor::{GPUSensors, Sensor, Sensors};
@@ -22,8 +24,6 @@ use crate::{
     BiosProfileType, Collection, NetworkDeviceFunction, ODataId, Redfish, RedfishError, Resource,
 };
 use crate::{EnabledDisabled, JobState, MachineSetupStatus, RoleId};
-use crate::model::certificate::Certificate;
-use crate::model::component_integrity::ComponentIntegrities;
 
 const UEFI_PASSWORD_NAME: &str = "AdminPassword";
 
@@ -644,30 +644,22 @@ impl Redfish for Bmc {
         _database_id: &str,
         _certificate_id: &str,
     ) -> Result<Certificate, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     async fn get_secure_boot_certificates(
         &self,
         _database_id: &str,
     ) -> Result<Vec<String>, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     async fn is_bios_setup(&self, _boot_interface_mac: Option<&str>) -> Result<bool, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     async fn enable_infinite_boot(&self) -> Result<(), RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     async fn trigger_evidence_collection(
@@ -675,42 +667,32 @@ impl Redfish for Bmc {
         _url: &str,
         _nonce: &str,
     ) -> Result<Task, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     async fn get_evidence(
         &self,
         _url: &str,
     ) -> Result<crate::model::component_integrity::Evidence, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     async fn get_firmware_for_component(
         &self,
         _component_integrity_id: &str,
     ) -> Result<crate::model::software_inventory::SoftwareInventory, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     async fn get_component_ca_certificate(
         &self,
         _url: &str,
     ) -> Result<crate::model::component_integrity::CaCertificate, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     async fn get_chassis_assembly(&self, _chassis_id: &str) -> Result<Assembly, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     fn ac_powercycle_supported_by_power(&self) -> bool {
@@ -718,23 +700,26 @@ impl Redfish for Bmc {
     }
 
     async fn is_boot_order_setup(&self, _mac_address: &str) -> Result<bool, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
     async fn get_component_integrities(&self) -> Result<ComponentIntegrities, RedfishError> {
-        Err(RedfishError::NotSupported(
-            "not supported".to_string(),
-        ))
+        Err(RedfishError::NotSupported("not supported".to_string()))
     }
 
-    async fn set_host_privilege_level(&self, level: HostPrivilegeLevel) -> Result<(), RedfishError> {
+    async fn set_host_privilege_level(
+        &self,
+        level: HostPrivilegeLevel,
+    ) -> Result<(), RedfishError> {
         self.s.set_host_privilege_level(level).await
     }
 
     async fn set_utc_timezone(&self) -> Result<(), RedfishError> {
         self.s.set_utc_timezone().await
+    }
+
+    async fn disable_psu_hot_spare(&self) -> Result<(), RedfishError> {
+        self.s.disable_psu_hot_spare().await
     }
 }
 

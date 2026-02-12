@@ -27,12 +27,33 @@ use serde::Serialize;
 use tokio::fs::File;
 
 use crate::{
-    BiosProfileType, Boot, BootOptions, Collection, EnabledDisabled, JobState, MachineSetupDiff, MachineSetupStatus, ODataId, PCIeDevice, PowerState, Redfish, RedfishError, Resource, RoleId, Status, StatusInternal, SystemPowerControl, model::{
-        BootOption, ComputerSystem, EnableDisable, InvalidValueError, Manager, account_service::ManagerAccount, boot, certificate::Certificate, chassis::{Assembly, Chassis, NetworkAdapter}, component_integrity::ComponentIntegrities, network_device_function::NetworkDeviceFunction, oem::{
+    model::{
+        account_service::ManagerAccount,
+        boot,
+        certificate::Certificate,
+        chassis::{Assembly, Chassis, NetworkAdapter},
+        component_integrity::ComponentIntegrities,
+        network_device_function::NetworkDeviceFunction,
+        oem::{
             nvidia_dpu::{HostPrivilegeLevel, NicMode},
             supermicro::{self, FixedBootOrder},
-        }, power::Power, secure_boot::SecureBoot, sel::LogEntry, sensor::GPUSensors, service_root::{RedfishVendor, ServiceRoot}, software_inventory::SoftwareInventory, storage::Drives, task::Task, thermal::Thermal, update_service::{ComponentType, TransferProtocolType, UpdateService}
-    }, standard::RedfishStandard
+        },
+        power::Power,
+        secure_boot::SecureBoot,
+        sel::LogEntry,
+        sensor::GPUSensors,
+        service_root::{RedfishVendor, ServiceRoot},
+        software_inventory::SoftwareInventory,
+        storage::Drives,
+        task::Task,
+        thermal::Thermal,
+        update_service::{ComponentType, TransferProtocolType, UpdateService},
+        BootOption, ComputerSystem, EnableDisable, InvalidValueError, Manager,
+    },
+    standard::RedfishStandard,
+    BiosProfileType, Boot, BootOptions, Collection, EnabledDisabled, JobState, MachineSetupDiff,
+    MachineSetupStatus, ODataId, PCIeDevice, PowerState, Redfish, RedfishError, Resource, RoleId,
+    Status, StatusInternal, SystemPowerControl,
 };
 
 const MELLANOX_UEFI_HTTP_IPV4: &str = "UEFI HTTP IPv4 Mellanox Network Adapter";
@@ -907,12 +928,19 @@ impl Redfish for Bmc {
         self.s.get_evidence(url).await
     }
 
-    async fn set_host_privilege_level(&self, level: HostPrivilegeLevel) -> Result<(), RedfishError> {
+    async fn set_host_privilege_level(
+        &self,
+        level: HostPrivilegeLevel,
+    ) -> Result<(), RedfishError> {
         self.s.set_host_privilege_level(level).await
     }
 
     async fn set_utc_timezone(&self) -> Result<(), RedfishError> {
         self.s.set_utc_timezone().await
+    }
+
+    async fn disable_psu_hot_spare(&self) -> Result<(), RedfishError> {
+        self.s.disable_psu_hot_spare().await
     }
 }
 

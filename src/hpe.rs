@@ -25,12 +25,34 @@ use std::{collections::HashMap, path::Path, time::Duration};
 use serde_json::Value;
 
 use crate::{
-    BiosProfileType, Boot, BootOptions, Collection, Deserialize, EnabledDisabled::{self, Disabled, Enabled}, JobState, MachineSetupDiff, MachineSetupStatus, OData, ODataId, PCIeDevice, PowerState, Redfish, RedfishError, Resource, RoleId, Serialize, Status, StatusInternal, SystemPowerControl, model::{
-        BootOption, ComputerSystem, Manager, Slot, SystemStatus, account_service::ManagerAccount, certificate::Certificate, chassis::{Assembly, Chassis, NetworkAdapter}, component_integrity::ComponentIntegrities, network_device_function::NetworkDeviceFunction, oem::{
+    model::{
+        account_service::ManagerAccount,
+        certificate::Certificate,
+        chassis::{Assembly, Chassis, NetworkAdapter},
+        component_integrity::ComponentIntegrities,
+        network_device_function::NetworkDeviceFunction,
+        oem::{
             hpe::{self, BootDevices},
             nvidia_dpu::{HostPrivilegeLevel, NicMode},
-        }, power::Power, secure_boot::SecureBoot, sel::{LogEntry, LogEntryCollection}, sensor::GPUSensors, service_root::{RedfishVendor, ServiceRoot}, software_inventory::SoftwareInventory, storage::{self, Drives}, task::Task, thermal::Thermal, update_service::{ComponentType, TransferProtocolType, UpdateService}
-    }, network::REDFISH_ENDPOINT, standard::RedfishStandard
+        },
+        power::Power,
+        secure_boot::SecureBoot,
+        sel::{LogEntry, LogEntryCollection},
+        sensor::GPUSensors,
+        service_root::{RedfishVendor, ServiceRoot},
+        software_inventory::SoftwareInventory,
+        storage::{self, Drives},
+        task::Task,
+        thermal::Thermal,
+        update_service::{ComponentType, TransferProtocolType, UpdateService},
+        BootOption, ComputerSystem, Manager, Slot, SystemStatus,
+    },
+    network::REDFISH_ENDPOINT,
+    standard::RedfishStandard,
+    BiosProfileType, Boot, BootOptions, Collection, Deserialize,
+    EnabledDisabled::{self, Disabled, Enabled},
+    JobState, MachineSetupDiff, MachineSetupStatus, OData, ODataId, PCIeDevice, PowerState,
+    Redfish, RedfishError, Resource, RoleId, Serialize, Status, StatusInternal, SystemPowerControl,
 };
 
 // The following is specific for the HPE machine since the HPE redfish
@@ -913,12 +935,19 @@ impl Redfish for Bmc {
         self.s.get_evidence(url).await
     }
 
-    async fn set_host_privilege_level(&self, level: HostPrivilegeLevel) -> Result<(), RedfishError> {
+    async fn set_host_privilege_level(
+        &self,
+        level: HostPrivilegeLevel,
+    ) -> Result<(), RedfishError> {
         self.s.set_host_privilege_level(level).await
     }
 
     async fn set_utc_timezone(&self) -> Result<(), RedfishError> {
         self.s.set_utc_timezone().await
+    }
+
+    async fn disable_psu_hot_spare(&self) -> Result<(), RedfishError> {
+        self.s.disable_psu_hot_spare().await
     }
 }
 
@@ -1120,7 +1149,9 @@ impl Bmc {
             Err(RedfishError::MissingKey {
                 key: format!(
                     "{}/{}/{}",
-                    INTEL_ENABLE_VIRTUALIZATION_KEY, AMD_ENABLE_VIRTUALIZATION_KEY, PROC_VIRTUALIZATION_KEY
+                    INTEL_ENABLE_VIRTUALIZATION_KEY,
+                    AMD_ENABLE_VIRTUALIZATION_KEY,
+                    PROC_VIRTUALIZATION_KEY
                 )
                 .to_string(),
                 url: format!("Systems/{}/Bios", self.s.system_id()),

@@ -377,9 +377,9 @@ impl Redfish for Bmc {
         let bios = self.bios().await?;
         let url = format!("Systems/{}/Bios", self.s.system_id());
         let current_attrs = jsonmap::get_object(&bios, "Attributes", &url)?;
-        
+
         let mut attributes = HashMap::new();
-        
+
         attributes.insert(
             "DevicesandIOPorts_COMPort1",
             EnabledDisabled::Enabled.to_string(),
@@ -410,10 +410,10 @@ impl Redfish for Bmc {
                 EnabledDisabled::Enabled.to_string(),
             );
         }
-        
+
         let mut body = HashMap::new();
         body.insert("Attributes", attributes);
-        
+
         let url = format!("Systems/{}/Bios/Pending", self.s.system_id());
         self.s.client.patch(&url, body).await.map(|_status_code| ())
     }
@@ -430,14 +430,22 @@ impl Redfish for Bmc {
             ("DevicesandIOPorts_ConsoleRedirection", "Enabled", "Auto"),
             ("DevicesandIOPorts_SerialPortSharing", "Enabled", "Disabled"),
             ("DevicesandIOPorts_SPRedirection", "Enabled", "Disabled"),
-            ("DevicesandIOPorts_COMPortActiveAfterBoot", "Enabled", "Disabled"),
-            ("DevicesandIOPorts_SerialPortAccessMode", "Shared", "Disabled"),
+            (
+                "DevicesandIOPorts_COMPortActiveAfterBoot",
+                "Enabled",
+                "Disabled",
+            ),
+            (
+                "DevicesandIOPorts_SerialPortAccessMode",
+                "Shared",
+                "Disabled",
+            ),
         ];
-        
+
         let mut message = String::new();
         let mut enabled = true;
         let mut disabled = true;
-        
+
         for (key, val_enabled, val_disabled) in expected {
             if let Some(val_current) = attrs.get(key).and_then(|v| v.as_str()) {
                 message.push_str(&format!("{key}={val_current} "));
@@ -992,12 +1000,19 @@ impl Redfish for Bmc {
         self.s.get_evidence(url).await
     }
 
-    async fn set_host_privilege_level(&self, level: HostPrivilegeLevel) -> Result<(), RedfishError> {
+    async fn set_host_privilege_level(
+        &self,
+        level: HostPrivilegeLevel,
+    ) -> Result<(), RedfishError> {
         self.s.set_host_privilege_level(level).await
     }
 
     async fn set_utc_timezone(&self) -> Result<(), RedfishError> {
         self.s.set_utc_timezone().await
+    }
+
+    async fn disable_psu_hot_spare(&self) -> Result<(), RedfishError> {
+        self.s.disable_psu_hot_spare().await
     }
 }
 
@@ -1102,7 +1117,10 @@ impl Bmc {
 
         // Swap our DPU with the old network priority
         let mut attrs = HashMap::from([("BootOrder_NetworkPriority_1".to_string(), dpu_val)]);
-        if let Some(old) = bios.get("BootOrder_NetworkPriority_1").and_then(|v| v.as_str()) {
+        if let Some(old) = bios
+            .get("BootOrder_NetworkPriority_1")
+            .and_then(|v| v.as_str())
+        {
             attrs.insert(format!("BootOrder_NetworkPriority_{pos}"), old.to_string());
         }
 
@@ -1219,7 +1237,7 @@ impl Bmc {
             }
         }
 
-        // Get the first boot option from the actual boot order 
+        // Get the first boot option from the actual boot order
         // Some lenovos return an unordered BootOptions collection
         let system = self.get_system().await?;
         let boot_first_name = match system.boot.boot_order.first() {
@@ -1529,9 +1547,9 @@ impl Bmc {
         let bios = self.bios().await?;
         let url = format!("Systems/{}/Bios", self.s.system_id());
         let attrs = jsonmap::get_object(&bios, "Attributes", &url)?;
-        
+
         let mut attributes = self.uefi_boot_only_attributes();
-        
+
         // Legacy BIOS attributes only exist in older systems
         // Only set them if they're present in the current BIOS
         if attrs.contains_key("LegacyBIOS_NonOnboardPXE") {
@@ -1540,7 +1558,7 @@ impl Bmc {
         if attrs.contains_key("LegacyBIOS_LegacyBIOS") {
             attributes.insert("LegacyBIOS_LegacyBIOS", "Disabled");
         }
-        
+
         let mut body = HashMap::new();
         body.insert("Attributes", attributes);
         let url = format!("Systems/{}/Bios/Pending", self.s.system_id());
@@ -1713,7 +1731,10 @@ impl Bmc {
         boot_interface_mac: &str,
     ) -> Result<(Option<String>, Option<String>), RedfishError> {
         // Try the OEM NetworkBootOrder path first (older firmware)
-        match self.get_expected_and_actual_first_boot_option_oem(boot_interface_mac).await {
+        match self
+            .get_expected_and_actual_first_boot_option_oem(boot_interface_mac)
+            .await
+        {
             Ok(result) => return Ok(result),
             Err(RedfishError::HTTPErrorCode {
                 status_code: StatusCode::NOT_FOUND,

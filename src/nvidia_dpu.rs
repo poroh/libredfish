@@ -879,6 +879,10 @@ impl Redfish for Bmc {
     async fn set_utc_timezone(&self) -> Result<(), RedfishError> {
         self.s.set_utc_timezone().await
     }
+
+    async fn disable_psu_hot_spare(&self) -> Result<(), RedfishError> {
+        self.s.disable_psu_hot_spare().await
+    }
 }
 
 impl Bmc {

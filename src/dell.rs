@@ -28,12 +28,34 @@ use serde_json::Value;
 use tokio::fs::File;
 
 use crate::{
-    BiosProfileType, Boot, BootOptions, Collection, EnabledDisabled, JobState, MachineSetupDiff, MachineSetupStatus, ODataId, PCIeDevice, PowerState, Redfish, RedfishError, Resource, RoleId, Status, StatusInternal, SystemPowerControl, jsonmap, model::{
-        BootOption, ComputerSystem, InvalidValueError, Manager, OnOff, account_service::ManagerAccount, certificate::Certificate, chassis::{Assembly, Chassis, NetworkAdapter}, component_integrity::ComponentIntegrities, network_device_function::NetworkDeviceFunction, oem::{
+    jsonmap,
+    model::{
+        account_service::ManagerAccount,
+        certificate::Certificate,
+        chassis::{Assembly, Chassis, NetworkAdapter},
+        component_integrity::ComponentIntegrities,
+        network_device_function::NetworkDeviceFunction,
+        oem::{
             dell::{self, ShareParameters, StorageCollection, SystemConfiguration},
             nvidia_dpu::{HostPrivilegeLevel, NicMode},
-        }, power::Power, resource::ResourceCollection, secure_boot::SecureBoot, sel::{LogEntry, LogEntryCollection}, sensor::GPUSensors, service_root::{RedfishVendor, ServiceRoot}, software_inventory::SoftwareInventory, storage::Drives, task::Task, thermal::Thermal, update_service::{ComponentType, TransferProtocolType, UpdateService}
-    }, standard::RedfishStandard
+        },
+        power::Power,
+        resource::ResourceCollection,
+        secure_boot::SecureBoot,
+        sel::{LogEntry, LogEntryCollection},
+        sensor::GPUSensors,
+        service_root::{RedfishVendor, ServiceRoot},
+        software_inventory::SoftwareInventory,
+        storage::Drives,
+        task::Task,
+        thermal::Thermal,
+        update_service::{ComponentType, TransferProtocolType, UpdateService},
+        BootOption, ComputerSystem, InvalidValueError, Manager, OnOff,
+    },
+    standard::RedfishStandard,
+    BiosProfileType, Boot, BootOptions, Collection, EnabledDisabled, JobState, MachineSetupDiff,
+    MachineSetupStatus, ODataId, PCIeDevice, PowerState, Redfish, RedfishError, Resource, RoleId,
+    Status, StatusInternal, SystemPowerControl,
 };
 
 const UEFI_PASSWORD_NAME: &str = "SetupPassword";
@@ -884,7 +906,9 @@ impl Redfish for Bmc {
 
         // Fallback to ImportSystemConfiguration hack for older iDRAC
         // See: https://github.com/dell/iDRAC-Redfish-Scripting/issues/308
-        let job_id = self.clear_uefi_password_via_import(current_uefi_password).await?;
+        let job_id = self
+            .clear_uefi_password_via_import(current_uefi_password)
+            .await?;
         Ok(Some(job_id))
     }
 
@@ -1043,7 +1067,10 @@ impl Redfish for Bmc {
         self.s.get_evidence(url).await
     }
 
-    async fn set_host_privilege_level(&self, level: HostPrivilegeLevel) -> Result<(), RedfishError> {
+    async fn set_host_privilege_level(
+        &self,
+        level: HostPrivilegeLevel,
+    ) -> Result<(), RedfishError> {
         self.s.set_host_privilege_level(level).await
     }
 
@@ -1055,6 +1082,19 @@ impl Redfish for Bmc {
         timezone_attrs.insert("Time.1.Timezone", "UTC");
 
         let body = HashMap::from([("Attributes", timezone_attrs)]);
+
+        self.s.client.patch(&url, body).await?;
+        Ok(())
+    }
+
+    async fn disable_psu_hot_spare(&self) -> Result<(), RedfishError> {
+        let manager_id = self.s.manager_id();
+        let url = format!("Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}");
+
+        let mut psu_attrs = HashMap::new();
+        psu_attrs.insert("ServerPwr.1.PSRapidOn", "Disabled");
+
+        let body = HashMap::from([("Attributes", psu_attrs)]);
 
         self.s.client.patch(&url, body).await?;
         Ok(())
@@ -1136,8 +1176,7 @@ impl Bmc {
             dell::SerialPortTermSettings
         );
         // Only available in iDRAC 9
-        if let (Some(exp), Some(_)) =
-            (expected_attrs.redir_after_boot, bios.get("RedirAfterBoot"))
+        if let (Some(exp), Some(_)) = (expected_attrs.redir_after_boot, bios.get("RedirAfterBoot"))
         {
             diff!("RedirAfterBoot", exp, EnabledDisabled);
         }
@@ -1184,10 +1223,13 @@ impl Bmc {
                 Some(v) => v,
                 // Only available in iDRAC 9, skip if it doesn't exist
                 None if key == "OS-BMC.1.AdminState" => continue,
-                None => return Err(RedfishError::MissingKey {
-                    key: key.to_string(),
-                    url: "Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}".to_string(),
-                }),
+                None => {
+                    return Err(RedfishError::MissingKey {
+                        key: key.to_string(),
+                        url: "Managers/{manager_id}/Oem/Dell/DellAttributes/{manager_id}"
+                            .to_string(),
+                    })
+                }
             };
             if act != exp {
                 diffs.push(MachineSetupDiff {
@@ -1442,9 +1484,7 @@ impl Bmc {
                 ..
             }) => {
                 // Regular path doesn't exist, fall back to OEM path (iDRAC 10+)
-                tracing::info!(
-                    "Managers/Attributes not found, using OEM DellAttributes path"
-                );
+                tracing::info!("Managers/Attributes not found, using OEM DellAttributes path");
             }
             Err(e) => return Err(e),
         }
@@ -1700,7 +1740,7 @@ impl Bmc {
         attributes.insert("WebServer.1.HostHeaderCheck", "Disabled".to_string());
         // racadm set iDRAC.IPMILan.Enable 1
         attributes.insert("IPMILan.1.Enable", "Enabled".to_string());
-        
+
         // Only available in iDRAC 9
         if current_attrs.get("OS-BMC.1.AdminState").is_some() {
             attributes.insert("OS-BMC.1.AdminState", "Disabled".to_string());
@@ -1812,10 +1852,13 @@ impl Bmc {
             .then_some(EnabledDisabled::Enabled);
 
         // BootMode: Read-only in iDRAC 10 (UEFI-only hardware), writable in iDRAC 9
-        let boot_mode = match curr_bios_attributes.get("BootMode").and_then(|v| v.as_str()) {
-            Some("Uefi") => None, // Already correct, don't touch it
+        let boot_mode = match curr_bios_attributes
+            .get("BootMode")
+            .and_then(|v| v.as_str())
+        {
+            Some("Uefi") => None,                // Already correct, don't touch it
             Some(_) => Some("Uefi".to_string()), // Try to fix it (iDRAC 9)
-            None => None, // Attribute doesn't exist
+            None => None,                        // Attribute doesn't exist
         };
 
         // Detect newer iDRAC by checking SerialPortAddress format.
